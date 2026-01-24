@@ -15,6 +15,8 @@ Voice shell wrapper (STT+TTS) w Node.js (ESM).
 ./stts.mjs make build
 ```
 
+Uwaga: część "rozszerzeń" CLI (np. `{STT}` placeholder, `--stt-once`, `--init`) jest dostępna tylko w wersji Python (`./stts`).
+
 ## .env (konfiguracja)
 
 Skrypt automatycznie wczytuje `.env` (z katalogu uruchomienia, `nodejs/` albo root repo).
@@ -76,7 +78,22 @@ make docker-build
 make docker-test
 ```
 
-Uruchomienie interaktywne z cache (modele nie będą pobierane za każdym razem):
+Testy i uruchomienie interaktywne montują cache/config jako volume (żeby nie pobierać modeli za każdym razem).
+Domyślnie `CACHE_DIR=~/.config/stts-nodejs`.
+
+Możesz nadpisać katalog cache:
+
+```bash
+make docker-test CACHE_DIR=/tmp/stts-nodejs-cache
+```
+
+Jeśli chcesz uruchomić testy dla wszystkich platform (Python + Node.js), użyj w root repo:
+
+```bash
+make test-docker
+```
+
+Uruchomienie interaktywne z cache:
 
 ```bash
 make docker-run

@@ -7,6 +7,7 @@ Voice shell wrapper (STT+TTS) w Pythonie.
 ```bash
 ./stts
 ./stts --setup
+./stts --init whisper_cpp:tiny
 ./stts make build
 ```
 
@@ -24,9 +25,12 @@ cp .env.example .env
 Najważniejsze zmienne:
 
 - `STTS_CONFIG_DIR` - gdzie trzymać modele i config (przydatne dla Docker cache)
+- `STTS_TIMEOUT` - czas nagrywania STT (sekundy), domyślnie `5`
 - `STTS_NLP2CMD_ENABLED=1` - włącza NL → komenda przez `nlp2cmd`
 - `STTS_NLP2CMD_ARGS=-r` - tryb jak w przykładach ("Pokaż użytkowników")
 - `STTS_NLP2CMD_CONFIRM=1` - zawsze pytaj o potwierdzenie
+
+Uwaga: logi STT mają timestampy i czasy trwania (nagrywanie / rozpoznawanie), co ułatwia mierzenie opóźnień.
 
 ## NLP2CMD (Natural Language → komendy)
 
@@ -48,6 +52,63 @@ nlp2cmd -r "Pokaż użytkowników"
 
 nlp2cmd -r "otwórz https://www.prototypowanie.pl/kontakt/ i wypelnij formularz i wyslij"
 ```
+
+### `{STT}` placeholder (command wrapper)
+
+Możesz uruchomić dowolną komendę i wstawić transkrypt z mikrofonu jako `{STT}`:
+
+```bash
+STTS_NLP2CMD_ENABLED=1 ./stts nlp2cmd -r "{STT}"
+```
+
+### Pipeline (jednorazowe STT → stdout)
+
+Tryb `--stt-once` wypisuje sam transkrypt na stdout (logi idą na stderr), więc nadaje się do pipe:
+
+```bash
+./stts --stt-once | xargs -I{} nlp2cmd -r "{}"
+```
+
+### Pipeline (TTS na końcu)
+
+Tryb `--tts-stdin` czyta stdin i czyta na głos ostatnią niepustą linię (przepuszczając output dalej):
+
+```bash
+... | ./stts --tts-stdin
+```
+
+Przykład: wygeneruj komendę i przeczytaj ją na głos (bez wykonania):
+
+```bash
+./stts --dry-run git commit -m "{STT}" | ./stts --tts-stdin
+```
+
+### Jednolinijkowy setup (bez interakcji)
+
+```bash
+./stts --init whisper_cpp:tiny
+./stts --init whisper_cpp:base
+```
+
+### TTS w jednej linijce (bez interakcji)
+
+```bash
+./stts --tts-provider espeak --tts-voice pl
+```
+
+Lepsze (neural) TTS przez `piper`:
+
+```bash
+# Provider: piper
+./stts --tts-provider piper --tts-voice pl_PL-gosia-medium
+
+# albo podaj ścieżkę do modelu .onnx
+./stts --tts-provider piper --tts-voice ~/.config/stts-python/models/piper/pl_PL-gosia-medium.onnx
+```
+
+Modele `piper` możesz trzymać w `~/.config/stts-python/models/piper/` jako `*.onnx`.
+
+Konfiguracja zapisywana jest w `~/.config/stts-python/config.json`.
 
 ## Komendy interaktywne (Y/n itd.)
 
@@ -84,7 +145,16 @@ make docker-build
 make docker-test
 ```
 
-Uruchomienie interaktywne z cache (modele nie będą pobierane za każdym razem):
+Testy i uruchomienie interaktywne montują cache/config jako volume (żeby nie pobierać modeli za każdym razem).
+Domyślnie `CACHE_DIR=~/.config/stts-python`.
+
+Możesz nadpisać katalog cache:
+
+```bash
+make docker-test CACHE_DIR=/tmp/stts-python-cache
+```
+
+Uruchomienie interaktywne z cache:
 
 ```bash
 make docker-run

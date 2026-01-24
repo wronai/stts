@@ -33,6 +33,8 @@ import shlex
 import time
 import struct
 import contextlib
+import tempfile
+import re
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional, List, Tuple
@@ -75,7 +77,9 @@ load_dotenv()
 
 _CONFIG_DIR_ENV = os.environ.get("STTS_CONFIG_DIR")
 CONFIG_DIR = (Path(_CONFIG_DIR_ENV).expanduser() if _CONFIG_DIR_ENV else (Path.home() / ".config" / "stts-python"))
-CONFIG_FILE = CONFIG_DIR / "config.json"
+CONFIG_FILE_JSON = CONFIG_DIR / "config.json"
+CONFIG_FILE_YAML = CONFIG_DIR / "config.yaml"
+CONFIG_FILE_YML = CONFIG_DIR / "config.yml"
 MODELS_DIR = CONFIG_DIR / "models"
 HISTORY_FILE = CONFIG_DIR / "history"
 
@@ -85,13 +89,17 @@ DEFAULT_CONFIG = {
     "stt_model": None,
     "tts_voice": "pl",
     "language": "pl",
-    "timeout": 2,
+    "timeout": 5,
     "auto_tts": True,
     "mic_device": None,
     "speaker_device": None,
     "audio_auto_switch": True,
     "prompt_voice_first": True,
     "startup_tts": True,
+    "vad_enabled": True,
+    "vad_silence_ms": 800,
+    "vad_threshold_db": -45.0,
+    "safe_mode": False,
 }
 
 
@@ -103,8 +111,23 @@ def apply_env_overrides(config: dict) -> dict:
             pass
     if os.environ.get("STTS_LANGUAGE"):
         config["language"] = os.environ["STTS_LANGUAGE"].strip() or config.get("language")
+    if os.environ.get("STTS_STT_PROVIDER"):
+        v = os.environ["STTS_STT_PROVIDER"].strip()
+        if v in ("whisper", "whisper.cpp"):
+            v = "whisper_cpp"
+        config["stt_provider"] = v or None
+    if os.environ.get("STTS_STT_MODEL"):
+        v = os.environ["STTS_STT_MODEL"].strip()
+        config["stt_model"] = v or None
     if os.environ.get("STTS_TTS_VOICE"):
         config["tts_voice"] = os.environ["STTS_TTS_VOICE"].strip() or config.get("tts_voice")
+    if os.environ.get("STTS_TTS_PROVIDER"):
+        v = os.environ["STTS_TTS_PROVIDER"].strip()
+        if v in ("espeak-ng",):
+            v = "espeak"
+        config["tts_provider"] = v or None
+    if os.environ.get("STTS_AUTO_TTS"):
+        config["auto_tts"] = os.environ["STTS_AUTO_TTS"].strip() not in ("0", "false", "no", "n")
     if os.environ.get("STTS_MIC_DEVICE"):
         v = os.environ["STTS_MIC_DEVICE"].strip()
         config["mic_device"] = None if v in ("0", "auto", "") else v
@@ -113,6 +136,24 @@ def apply_env_overrides(config: dict) -> dict:
         config["speaker_device"] = None if v in ("0", "auto", "") else v
     if os.environ.get("STTS_AUDIO_AUTO_SWITCH"):
         config["audio_auto_switch"] = os.environ["STTS_AUDIO_AUTO_SWITCH"].strip() not in ("0", "false", "no", "n")
+    if os.environ.get("STTS_PROMPT_VOICE_FIRST"):
+        config["prompt_voice_first"] = os.environ["STTS_PROMPT_VOICE_FIRST"].strip() not in ("0", "false", "no", "n")
+    if os.environ.get("STTS_STARTUP_TTS"):
+        config["startup_tts"] = os.environ["STTS_STARTUP_TTS"].strip() not in ("0", "false", "no", "n")
+    if os.environ.get("STTS_VAD_ENABLED"):
+        config["vad_enabled"] = os.environ["STTS_VAD_ENABLED"].strip() not in ("0", "false", "no", "n")
+    if os.environ.get("STTS_VAD_SILENCE_MS"):
+        try:
+            config["vad_silence_ms"] = int(os.environ["STTS_VAD_SILENCE_MS"])
+        except Exception:
+            pass
+    if os.environ.get("STTS_VAD_THRESHOLD_DB"):
+        try:
+            config["vad_threshold_db"] = float(os.environ["STTS_VAD_THRESHOLD_DB"])
+        except Exception:
+            pass
+    if os.environ.get("STTS_SAFE_MODE"):
+        config["safe_mode"] = os.environ["STTS_SAFE_MODE"].strip() not in ("0", "false", "no", "n")
     return config
 
 class Colors:
@@ -215,19 +256,148 @@ def detect_system() -> SystemInfo:
 
 def load_config() -> dict:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    if CONFIG_FILE.exists():
+    cfg = DEFAULT_CONFIG.copy()
+    path = _get_config_file_for_load()
+    if path is not None and path.exists():
         try:
-            cfg = DEFAULT_CONFIG.copy()
-            cfg.update(json.loads(CONFIG_FILE.read_text()))
+            if path.suffix in (".yaml", ".yml"):
+                cfg.update(_parse_simple_yaml(path.read_text(encoding="utf-8")))
+            else:
+                cfg.update(json.loads(path.read_text(encoding="utf-8")))
             return apply_env_overrides(cfg)
-        except:
+        except Exception:
             pass
     return apply_env_overrides(DEFAULT_CONFIG.copy())
 
 
 def save_config(config: dict) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(json.dumps(config, indent=2))
+    path = _get_config_file_for_save()
+    if path.suffix in (".yaml", ".yml"):
+        path.write_text(_dump_simple_yaml(config), encoding="utf-8")
+    else:
+        path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+
+def _normalize_config_format(v: Optional[str]) -> Optional[str]:
+    if not v:
+        return None
+    s = v.strip().lower()
+    if s in ("yaml", "yml"):
+        return "yaml"
+    if s in ("json",):
+        return "json"
+    return None
+
+
+def _get_config_file_for_load() -> Optional[Path]:
+    fmt = _normalize_config_format(os.environ.get("STTS_CONFIG_FORMAT"))
+    if fmt == "yaml":
+        if CONFIG_FILE_YAML.exists():
+            return CONFIG_FILE_YAML
+        if CONFIG_FILE_YML.exists():
+            return CONFIG_FILE_YML
+        return CONFIG_FILE_YAML
+    if fmt == "json":
+        return CONFIG_FILE_JSON
+
+    # auto-detect: prefer YAML if present
+    if CONFIG_FILE_YAML.exists():
+        return CONFIG_FILE_YAML
+    if CONFIG_FILE_YML.exists():
+        return CONFIG_FILE_YML
+    if CONFIG_FILE_JSON.exists():
+        return CONFIG_FILE_JSON
+    return CONFIG_FILE_JSON
+
+
+def _get_config_file_for_save() -> Path:
+    fmt = _normalize_config_format(os.environ.get("STTS_CONFIG_FORMAT"))
+    if fmt == "yaml":
+        # preserve existing .yml if used
+        if CONFIG_FILE_YML.exists() and not CONFIG_FILE_YAML.exists():
+            return CONFIG_FILE_YML
+        return CONFIG_FILE_YAML
+    if fmt == "json":
+        return CONFIG_FILE_JSON
+
+    # auto: save where user already has config
+    if CONFIG_FILE_YAML.exists():
+        return CONFIG_FILE_YAML
+    if CONFIG_FILE_YML.exists():
+        return CONFIG_FILE_YML
+    if CONFIG_FILE_JSON.exists():
+        return CONFIG_FILE_JSON
+    return CONFIG_FILE_JSON
+
+
+def _parse_simple_yaml(text: str) -> dict:
+    """Very small YAML subset parser for flat key: value maps."""
+    out: dict = {}
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if ":" not in line:
+            continue
+        k, v = line.split(":", 1)
+        key = k.strip()
+        if not key:
+            continue
+        val_s = v.strip()
+        if not val_s or val_s in ("null", "~"):
+            out[key] = None
+            continue
+
+        if (val_s.startswith("\"") and val_s.endswith("\"")) or (val_s.startswith("'") and val_s.endswith("'")):
+            out[key] = val_s[1:-1]
+            continue
+
+        low = val_s.lower()
+        if low in ("true", "yes", "y", "on"):
+            out[key] = True
+            continue
+        if low in ("false", "no", "n", "off"):
+            out[key] = False
+            continue
+
+        try:
+            if any(ch in val_s for ch in (".", "e", "E")):
+                out[key] = float(val_s)
+            else:
+                out[key] = int(val_s)
+            continue
+        except Exception:
+            pass
+
+        out[key] = val_s
+    return out
+
+
+def _dump_simple_yaml(data: dict) -> str:
+    """Dump flat dict to YAML (simple key: value)."""
+    def fmt(v):
+        if v is None:
+            return "null"
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        if isinstance(v, (int, float)):
+            return str(v)
+        s = str(v)
+        if s == "":
+            return "\"\""
+        needs_quote = any(ch.isspace() for ch in s) or any(ch in s for ch in (":", "#", "\"", "'"))
+        if needs_quote:
+            s2 = s.replace("\\", "\\\\").replace("\"", "\\\"")
+            return f"\"{s2}\""
+        return s
+
+    lines = []
+    for k in sorted(data.keys()):
+        if not isinstance(k, str):
+            continue
+        lines.append(f"{k}: {fmt(data[k])}")
+    return "\n".join(lines) + "\n"
 
 
 def _run_text(cmd: List[str], timeout: int = 3) -> str:
@@ -736,8 +906,66 @@ class EspeakTTS(TTSProvider):
             )
 
 
+class PiperTTS(TTSProvider):
+    name = "piper"
+
+    @classmethod
+    def is_available(cls, info: SystemInfo):
+        if shutil.which("piper"):
+            return True, "piper found"
+        return False, "install piper (binary)"
+
+    def _resolve_model(self) -> Optional[str]:
+        v = (self.voice or "").strip()
+        if not v:
+            return None
+        p = Path(v).expanduser()
+        if p.exists() and p.is_file():
+            return str(p)
+        p2 = MODELS_DIR / "piper" / f"{v}.onnx"
+        if p2.exists():
+            return str(p2)
+        return None
+
+    def _play_wav(self, wav_path: str) -> None:
+        player = shutil.which("paplay") or shutil.which("aplay") or shutil.which("play")
+        if not player:
+            cprint(Colors.YELLOW, "⚠️  Brak odtwarzacza audio (paplay/aplay/play)")
+            return
+        try:
+            if Path(player).name == "play":
+                subprocess.run([player, "-q", wav_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                subprocess.run([player, wav_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            return
+
+    def speak(self, text: str) -> None:
+        piper = shutil.which("piper")
+        model = self._resolve_model()
+        if not piper:
+            return
+        if not model:
+            cprint(Colors.YELLOW, "⚠️  Piper model nie ustawiony. Ustaw tts_voice na ścieżkę do .onnx lub nazwę z ~/.config/stts-python/models/piper/")
+            return
+        try:
+            with tempfile.NamedTemporaryFile(prefix="stts_piper_", suffix=".wav", delete=False) as f:
+                out_path = f.name
+            subprocess.run(
+                [piper, "--model", model, "--output_file", out_path],
+                input=text,
+                text=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=60,
+            )
+            self._play_wav(out_path)
+        except Exception:
+            return
+
+
 STT_PROVIDERS = {"whisper_cpp": WhisperCppSTT}
-TTS_PROVIDERS = {"espeak": EspeakTTS}
+TTS_PROVIDERS = {"espeak": EspeakTTS, "piper": PiperTTS}
 
 
 def _ts() -> str:
@@ -745,7 +973,105 @@ def _ts() -> str:
     return time.strftime("%H:%M:%S")
 
 
+def record_audio_vad(
+    max_duration: float = 5.0,
+    output_path: str = "/tmp/stts_audio.wav",
+    device: Optional[str] = None,
+    silence_ms: int = 800,
+    threshold_db: float = -45.0,
+    rate: int = 16000,
+) -> str:
+    """Record with VAD: stop early after silence_ms of silence below threshold_db."""
+    t0 = time.perf_counter()
+    cprint(Colors.GREEN, f"[{_ts()}] 🎤 Mów (max {max_duration:.0f}s, VAD)...", end=" ")
+
+    cmd = ["arecord"]
+    if device:
+        cmd += ["-D", device]
+    cmd += ["-q", "-r", str(rate), "-c", "1", "-f", "S16_LE", "-t", "raw", "-"]
+
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        cprint(Colors.RED, f"❌ arecord error: {e}")
+        return ""
+
+    chunk_samples = int(rate * 0.1)  # 100ms chunks
+    chunk_bytes = chunk_samples * 2
+    silence_samples_needed = int(silence_ms / 100)
+    max_samples = int(max_duration * 10)
+
+    all_audio = bytearray()
+    silence_count = 0
+    speech_detected = False
+    sample_count = 0
+
+    try:
+        while sample_count < max_samples:
+            chunk = proc.stdout.read(chunk_bytes)
+            if not chunk:
+                break
+            all_audio.extend(chunk)
+            sample_count += 1
+
+            # Calculate RMS for this chunk
+            n = len(chunk) // 2
+            if n > 0:
+                samples = struct.unpack("<" + "h" * n, chunk[:n * 2])
+                mean_sq = sum(float(s) * float(s) for s in samples) / float(n)
+                rms = math.sqrt(mean_sq)
+                db = 20.0 * math.log10(rms / 32767.0) if rms > 0 else -120.0
+
+                if db > threshold_db:
+                    speech_detected = True
+                    silence_count = 0
+                else:
+                    silence_count += 1
+
+                # Stop if we had speech and now silence for silence_ms
+                if speech_detected and silence_count >= silence_samples_needed:
+                    break
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=1)
+        except Exception:
+            proc.kill()
+
+    elapsed = time.perf_counter() - t0
+
+    if not all_audio:
+        cprint(Colors.RED, f"❌ Brak danych audio")
+        return ""
+
+    # Write WAV
+    try:
+        with wave.open(output_path, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(rate)
+            wf.writeframes(bytes(all_audio))
+    except Exception as e:
+        cprint(Colors.RED, f"❌ WAV write error: {e}")
+        return ""
+
+    actual_dur = len(all_audio) / 2 / rate
+    if speech_detected:
+        cprint(Colors.GREEN, f"✅ VAD stop ({actual_dur:.1f}s / {elapsed:.1f}s)")
+    else:
+        print(f"⏱️ ({actual_dur:.1f}s)")
+
+    diag = analyze_wav(output_path)
+    if diag.get("ok"):
+        cprint(Colors.CYAN, f"🔎 audio: {diag['duration_s']}s, rms={diag['rms_dbfs']}dBFS")
+        if diag.get("class") == "silence":
+            cprint(Colors.YELLOW, "⚠️  Brak sygnału / cisza")
+
+    return output_path
+
+
 def record_audio(duration: int = 2, output_path: str = "/tmp/stts_audio.wav", device: Optional[str] = None) -> str:
+    """Fixed-duration recording (legacy, use record_audio_vad for better UX)."""
     info = detect_system()
     t0 = time.perf_counter()
     cprint(Colors.GREEN, f"[{_ts()}] 🎤 Mów ({duration}s)...", end=" ")
@@ -837,8 +1163,55 @@ def interactive_setup() -> dict:
         config["audio_auto_switch"] = (auto_sw != "n")
 
     save_config(config)
-    cprint(Colors.GREEN, f"✅ Saved: {CONFIG_FILE}")
+    cprint(Colors.GREEN, f"✅ Saved: {_get_config_file_for_save()}")
     return config
+
+
+# Dangerous command patterns (denylist)
+DANGEROUS_PATTERNS = [
+    r"^\s*rm\s+(-[rfRvfi\s]+)*\s*/\s*$",  # rm -rf /
+    r"^\s*rm\s+(-[rfRvfi\s]+)*\s*/[a-z]+",  # rm -rf /usr, /etc, etc.
+    r"^\s*dd\s+.*of=/dev/[sh]d",  # dd to disk
+    r"^\s*mkfs",  # format filesystem
+    r"^\s*:()\s*{\s*:\|\:&\s*}\s*;",  # fork bomb
+    r"^\s*chmod\s+(-[Rrf\s]+)*\s*777\s+/",  # chmod 777 /
+    r"^\s*chown\s+(-[Rrf\s]+)*\s*.*\s+/\s*$",  # chown / 
+    r"^\s*shutdown",
+    r"^\s*reboot",
+    r"^\s*init\s+0",
+    r"^\s*halt",
+    r">\s*/dev/[sh]d",  # write to disk device
+    r"^\s*curl.*\|\s*(ba)?sh",  # curl | sh
+    r"^\s*wget.*\|\s*(ba)?sh",  # wget | sh
+]
+
+# SQL patterns (not valid shell commands)
+SQL_PATTERNS = [
+    r"^\s*SELECT\s+",
+    r"^\s*INSERT\s+INTO\s+",
+    r"^\s*UPDATE\s+\w+\s+SET\s+",
+    r"^\s*DELETE\s+FROM\s+",
+    r"^\s*DROP\s+(TABLE|DATABASE)\s+",
+    r"^\s*CREATE\s+(TABLE|DATABASE)\s+",
+    r"^\s*ALTER\s+TABLE\s+",
+]
+
+
+def is_dangerous_command(cmd: str) -> Tuple[bool, str]:
+    """Check if command matches dangerous patterns. Returns (is_dangerous, reason)."""
+    cmd_lower = cmd.lower().strip()
+    for pattern in DANGEROUS_PATTERNS:
+        if re.search(pattern, cmd, re.IGNORECASE):
+            return True, f"Matches dangerous pattern: {pattern[:30]}..."
+    return False, ""
+
+
+def is_sql_command(cmd: str) -> bool:
+    """Check if command looks like SQL (not shell)."""
+    for pattern in SQL_PATTERNS:
+        if re.search(pattern, cmd, re.IGNORECASE):
+            return True
+    return False
 
 
 def nlp2cmd_translate(text: str) -> Optional[str]:
@@ -865,9 +1238,19 @@ def nlp2cmd_translate(text: str) -> Optional[str]:
             if l.lower().startswith("time:"):
                 continue
             if l.startswith("$"):
-                return l.lstrip("$").strip()
-            # shell-ish / sql-ish
-            if any(x in l for x in (" ", ";", "|", "&&", "||", "SELECT", "select", "docker", "kubectl", "git")):
+                candidate = l.lstrip("$").strip()
+                # Filter out SQL
+                if is_sql_command(candidate):
+                    cprint(Colors.YELLOW, f"⚠️  Wykryto SQL (nie shell): {candidate[:60]}...")
+                    cprint(Colors.CYAN, "💡 Użyj: ./stts sqlite3 db.sqlite \"{STT}\" lub ./stts psql -c \"{STT}\"")
+                    return None
+                return candidate
+            # skip SQL-like lines entirely
+            if is_sql_command(l):
+                cprint(Colors.YELLOW, f"⚠️  Wykryto SQL (nie shell): {l[:60]}...")
+                cprint(Colors.CYAN, "💡 Użyj: ./stts sqlite3 db.sqlite \"{STT}\" lub ./stts psql -c \"{STT}\"")
+                return None
+            if any(x in l for x in (" ", ";", "|", "&&", "||", "docker", "kubectl", "git")):
                 return l
             if l and all(ch.isalnum() or ch in ("-", "_", ".") for ch in l):
                 return l
@@ -951,7 +1334,17 @@ class VoiceShell:
 
     def listen(self, stt_file: Optional[str] = None) -> str:
         mic = self.config.get("mic_device")
-        audio_path = stt_file or record_audio(self.config.get("timeout", 2), device=mic)
+        if stt_file:
+            audio_path = stt_file
+        elif self.config.get("vad_enabled", True) and self.info.os_name == "linux":
+            audio_path = record_audio_vad(
+                max_duration=float(self.config.get("timeout", 5)),
+                device=mic,
+                silence_ms=self.config.get("vad_silence_ms", 800),
+                threshold_db=self.config.get("vad_threshold_db", -45.0),
+            )
+        else:
+            audio_path = record_audio(self.config.get("timeout", 2), device=mic)
         if not audio_path:
             return ""
         diag = analyze_wav(audio_path)
@@ -1123,6 +1516,18 @@ class VoiceShell:
                         cmd = translated
 
                 cprint(Colors.BLUE, f"▶️  {cmd}")
+
+                # Safety check in interactive mode
+                is_dangerous, reason = is_dangerous_command(cmd)
+                if is_dangerous:
+                    cprint(Colors.RED, f"🚫 ZABLOKOWANO: {reason}")
+                    continue
+                if self.config.get("safe_mode", False):
+                    cprint(Colors.YELLOW, f"🔒 SAFE MODE")
+                    ans = input("Uruchomić? (y/n): ").strip().lower()
+                    if ans != "y":
+                        continue
+
                 output, code, printed = self.run_command_any(cmd)
                 if output.strip() and not printed:
                     print(output)
@@ -1148,7 +1553,13 @@ def parse_args(argv: List[str]):
     stt_only = False
     stt_once = False
     setup = False
+    init = None
+    tts_provider = None
+    tts_voice = None
+    tts_stdin = False
     help_ = False
+    dry_run = False
+    safe_mode = False
     rest: List[str] = []
 
     it = iter(argv)
@@ -1161,11 +1572,23 @@ def parse_args(argv: List[str]):
             stt_once = True
         elif a == "--setup":
             setup = True
+        elif a == "--init":
+            init = next(it, None)
+        elif a == "--tts-provider":
+            tts_provider = next(it, None)
+        elif a == "--tts-voice":
+            tts_voice = next(it, None)
+        elif a == "--tts-stdin":
+            tts_stdin = True
+        elif a == "--dry-run":
+            dry_run = True
+        elif a == "--safe-mode":
+            safe_mode = True
         elif a in ("--help", "-h"):
             help_ = True
         else:
             rest.append(a)
-    return stt_file, stt_only, stt_once, setup, help_, rest
+    return stt_file, stt_only, stt_once, setup, init, tts_provider, tts_voice, tts_stdin, help_, dry_run, safe_mode, rest
 
 
 def _resolve_at_token(token: str, config: dict) -> Optional[str]:
@@ -1202,18 +1625,134 @@ def expand_placeholders(rest: List[str], shell: "VoiceShell", config: dict) -> O
     return out
 
 
+def quick_init(spec: str) -> dict:
+    """Quick non-interactive setup: --init whisper_cpp:tiny or --init whisper_cpp"""
+    config = load_config()
+    parts = spec.split(":")
+    provider = parts[0].strip()
+    model = parts[1].strip() if len(parts) > 1 else None
+
+    if provider in ("whisper_cpp", "whisper"):
+        config["stt_provider"] = "whisper_cpp"
+        config["stt_model"] = model or "tiny"
+        # Auto-download model if not present
+        stt_cls = WhisperCppSTT
+        info = detect_system()
+        available, _ = stt_cls.is_available(info)
+        if not available:
+            cprint(Colors.YELLOW, "Installing whisper.cpp...")
+            stt_cls.install(info)
+        model_path = MODELS_DIR / "whisper.cpp" / f"ggml-{config['stt_model']}.bin"
+        if not model_path.exists():
+            cprint(Colors.YELLOW, f"Downloading model {config['stt_model']}...")
+            stt_cls.download_model(config["stt_model"])
+    else:
+        config["stt_provider"] = provider
+        if model:
+            config["stt_model"] = model
+
+    # Default TTS to espeak if available
+    if shutil.which("espeak") or shutil.which("espeak-ng"):
+        config["tts_provider"] = "espeak"
+
+    save_config(config)
+    cprint(Colors.GREEN, f"✅ Initialized: STT={config['stt_provider']}:{config.get('stt_model')} TTS={config.get('tts_provider')}")
+    return config
+
+
+def apply_quick_tts(config: dict, tts_provider: Optional[str], tts_voice: Optional[str]) -> dict:
+    if tts_provider is not None:
+        v = tts_provider.strip()
+        config["tts_provider"] = v or None
+        if v in ("espeak", "espeak-ng"):
+            if not (shutil.which("espeak") or shutil.which("espeak-ng")):
+                cprint(Colors.YELLOW, "⚠️  espeak nie znaleziony. Zainstaluj: sudo apt install espeak")
+            config["tts_provider"] = "espeak"
+
+    if tts_voice is not None:
+        vv = tts_voice.strip()
+        config["tts_voice"] = vv or config.get("tts_voice", "pl")
+
+    return config
+
+
+def check_command_safety(cmd: str, config: dict, dry_run: bool = False) -> Tuple[bool, str]:
+    """Check if command is safe to run. Returns (ok_to_run, message)."""
+    # Check dangerous patterns
+    is_dangerous, reason = is_dangerous_command(cmd)
+    if is_dangerous:
+        cprint(Colors.RED, f"🚫 ZABLOKOWANO niebezpieczną komendę: {cmd[:60]}...")
+        cprint(Colors.YELLOW, f"   Powód: {reason}")
+        return False, reason
+
+    # Dry-run mode: don't execute
+    if dry_run:
+        return False, "dry-run"
+
+    # Safe mode: always confirm
+    if config.get("safe_mode", False):
+        cprint(Colors.YELLOW, f"🔒 SAFE MODE: {cmd}")
+        ans = input("Uruchomić? (y/n): ").strip().lower()
+        if ans != "y":
+            return False, "user_cancelled"
+
+    return True, ""
+
+
+def tts_from_stdin(shell: "VoiceShell") -> int:
+    data = sys.stdin.read()
+    # passthrough: keep pipeline output unchanged
+    if data:
+        sys.stdout.write(data)
+
+    lines = [l.strip() for l in data.splitlines() if l.strip()]
+    if not lines:
+        return 0
+
+    text = lines[-1][:200]
+    if shell.tts:
+        shell.tts.speak(text)
+    return 0
+
+
 def main():
     config = load_config()
-    stt_file, stt_only, stt_once, setup, help_, rest = parse_args(sys.argv[1:])
+    stt_file, stt_only, stt_once, setup, init, tts_provider, tts_voice, tts_stdin, help_, dry_run, safe_mode, rest = parse_args(sys.argv[1:])
+
+    # CLI --safe-mode overrides config
+    if safe_mode:
+        config["safe_mode"] = True
 
     if help_:
         print(__doc__)
+        print("\nOpcje bezpieczeństwa:")
+        print("  --dry-run      Pokaż komendę bez wykonania")
+        print("  --safe-mode    Zawsze pytaj przed wykonaniem")
+        print("\nTryby pipeline:")
+        print("  --tts-stdin    Czytaj stdin i przeczytaj na głos ostatnią niepustą linię")
+        print("\nZmienne środowiskowe:")
+        print("  STTS_SAFE_MODE=1       Włącz tryb bezpieczny")
+        print("  STTS_VAD_ENABLED=1     Włącz VAD auto-stop (domyślnie)")
+        print("  STTS_VAD_SILENCE_MS=800  Czas ciszy do zatrzymania (ms)")
         return 0
 
-    if setup or (config.get("stt_provider") is None and config.get("tts_provider") is None and not rest and not stt_file):
+    if tts_provider is not None or tts_voice is not None:
+        config = apply_quick_tts(config, tts_provider, tts_voice)
+        save_config(config)
+        cprint(Colors.GREEN, f"✅ Saved TTS: provider={config.get('tts_provider')} voice={config.get('tts_voice')}")
+        # If user only wanted to configure TTS, exit.
+        if not (init or setup or stt_once or stt_file or rest):
+            return 0
+
+    if init:
+        config = quick_init(init)
+    elif setup or (config.get("stt_provider") is None and config.get("tts_provider") is None and not rest and not stt_file and not tts_stdin):
         config = interactive_setup()
 
     shell = VoiceShell(config)
+
+    if tts_stdin:
+        return tts_from_stdin(shell)
 
     if stt_once:
         # Pipeline-friendly mode: transcript to stdout, all prompts/status to stderr
@@ -1248,6 +1787,20 @@ def main():
         return 1
 
     cmd = " ".join(expanded)
+
+    if dry_run:
+        # pipeline-friendly: only command to stdout; prompts/logs should go to stderr
+        with contextlib.redirect_stdout(sys.stderr):
+            ok, reason = check_command_safety(cmd, config, dry_run=True)
+        if reason == "dry-run":
+            print(cmd)
+            return 0
+
+    # Safety check
+    ok, reason = check_command_safety(cmd, config, dry_run)
+    if not ok:
+        return 0 if reason == "dry-run" else 1
+
     out, code = shell.run_command(cmd)
     if out.strip():
         print(out)

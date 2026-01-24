@@ -61,7 +61,9 @@ loadDotenv();
 const CONFIG_DIR = process.env.STTS_CONFIG_DIR
     ? process.env.STTS_CONFIG_DIR
     : join(homedir(), '.config', 'stts-nodejs');
-const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
+const CONFIG_FILE_JSON = join(CONFIG_DIR, 'config.json');
+const CONFIG_FILE_YAML = join(CONFIG_DIR, 'config.yaml');
+const CONFIG_FILE_YML = join(CONFIG_DIR, 'config.yml');
 const MODELS_DIR = join(CONFIG_DIR, 'models');
 const HISTORY_FILE = join(CONFIG_DIR, 'history');
 
@@ -81,7 +83,25 @@ function applyEnvOverrides(config) {
         if (Number.isFinite(n)) config.timeout = n;
     }
     if (process.env.STTS_LANGUAGE) config.language = String(process.env.STTS_LANGUAGE).trim() || config.language;
+    if (process.env.STTS_STT_PROVIDER) {
+        let v = String(process.env.STTS_STT_PROVIDER).trim();
+        if (v === 'whisper' || v === 'whisper.cpp') v = 'whisper_cpp';
+        config.stt_provider = v || null;
+    }
+    if (process.env.STTS_STT_MODEL) {
+        const v = String(process.env.STTS_STT_MODEL).trim();
+        config.stt_model = v || null;
+    }
+    if (process.env.STTS_TTS_PROVIDER) {
+        let v = String(process.env.STTS_TTS_PROVIDER).trim();
+        if (v === 'espeak-ng') v = 'espeak';
+        config.tts_provider = v || null;
+    }
     if (process.env.STTS_TTS_VOICE) config.tts_voice = String(process.env.STTS_TTS_VOICE).trim() || config.tts_voice;
+    if (process.env.STTS_AUTO_TTS) {
+        const v = String(process.env.STTS_AUTO_TTS).trim().toLowerCase();
+        config.auto_tts = !['0', 'false', 'no', 'n'].includes(v);
+    }
     return config;
 }
 
@@ -144,6 +164,97 @@ function ensureDir(dir) {
     if (!existsSync(dir)) {
         mkdirSync(dir, { recursive: true });
     }
+}
+
+function normalizeConfigFormat(v) {
+    if (!v) return null;
+    const s = String(v).trim().toLowerCase();
+    if (s === 'yaml' || s === 'yml') return 'yaml';
+    if (s === 'json') return 'json';
+    return null;
+}
+
+function getConfigFileForLoad() {
+    const fmt = normalizeConfigFormat(process.env.STTS_CONFIG_FORMAT);
+    if (fmt === 'yaml') {
+        if (existsSync(CONFIG_FILE_YAML)) return CONFIG_FILE_YAML;
+        if (existsSync(CONFIG_FILE_YML)) return CONFIG_FILE_YML;
+        return CONFIG_FILE_YAML;
+    }
+    if (fmt === 'json') return CONFIG_FILE_JSON;
+
+    // auto: prefer yaml if present
+    if (existsSync(CONFIG_FILE_YAML)) return CONFIG_FILE_YAML;
+    if (existsSync(CONFIG_FILE_YML)) return CONFIG_FILE_YML;
+    if (existsSync(CONFIG_FILE_JSON)) return CONFIG_FILE_JSON;
+    return CONFIG_FILE_JSON;
+}
+
+function getConfigFileForSave() {
+    const fmt = normalizeConfigFormat(process.env.STTS_CONFIG_FORMAT);
+    if (fmt === 'yaml') {
+        if (existsSync(CONFIG_FILE_YML) && !existsSync(CONFIG_FILE_YAML)) return CONFIG_FILE_YML;
+        return CONFIG_FILE_YAML;
+    }
+    if (fmt === 'json') return CONFIG_FILE_JSON;
+
+    if (existsSync(CONFIG_FILE_YAML)) return CONFIG_FILE_YAML;
+    if (existsSync(CONFIG_FILE_YML)) return CONFIG_FILE_YML;
+    if (existsSync(CONFIG_FILE_JSON)) return CONFIG_FILE_JSON;
+    return CONFIG_FILE_JSON;
+}
+
+function parseSimpleYaml(text) {
+    const out = {};
+    for (const raw of String(text || '').split(/\r?\n/)) {
+        const line = raw.trim();
+        if (!line || line.startsWith('#')) continue;
+        const idx = line.indexOf(':');
+        if (idx <= 0) continue;
+        const key = line.slice(0, idx).trim();
+        if (!key) continue;
+        const valS = line.slice(idx + 1).trim();
+        if (!valS || valS === 'null' || valS === '~') {
+            out[key] = null;
+            continue;
+        }
+        if ((valS.startsWith('"') && valS.endsWith('"')) || (valS.startsWith("'") && valS.endsWith("'"))) {
+            out[key] = valS.slice(1, -1);
+            continue;
+        }
+        const low = valS.toLowerCase();
+        if (['true', 'yes', 'y', 'on'].includes(low)) {
+            out[key] = true;
+            continue;
+        }
+        if (['false', 'no', 'n', 'off'].includes(low)) {
+            out[key] = false;
+            continue;
+        }
+        const num = Number(valS);
+        if (Number.isFinite(num) && /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(valS)) {
+            out[key] = valS.includes('.') || /[eE]/.test(valS) ? num : parseInt(valS, 10);
+            continue;
+        }
+        out[key] = valS;
+    }
+    return out;
+}
+
+function dumpSimpleYaml(data) {
+    const fmt = (v) => {
+        if (v === null || v === undefined) return 'null';
+        if (typeof v === 'boolean') return v ? 'true' : 'false';
+        if (typeof v === 'number') return String(v);
+        const s = String(v);
+        if (s === '') return '""';
+        const needsQuote = /\s/.test(s) || /[:#"']/.test(s);
+        if (needsQuote) return `"${s.replace(/\\/g, '\\\\').replace(/\"/g, '\\"')}"`;
+        return s;
+    };
+
+    const keys = Object.keys(data || {}).filter((k) => typeof k === 'string').sort();
+    return keys.map((k) => `${k}: ${fmt(data[k])}`).join('\n') + '\n';
 }
 
 function detectSystem() {
@@ -250,9 +361,15 @@ function downloadFile(url, destPath) {
 
 function loadConfig() {
     ensureDir(CONFIG_DIR);
-    if (existsSync(CONFIG_FILE)) {
+    const cfg = { ...DEFAULT_CONFIG };
+    const p = getConfigFileForLoad();
+    if (p && existsSync(p)) {
         try {
-            const cfg = { ...DEFAULT_CONFIG, ...JSON.parse(readFileSync(CONFIG_FILE, 'utf8')) };
+            if (p.endsWith('.yaml') || p.endsWith('.yml')) {
+                Object.assign(cfg, parseSimpleYaml(readFileSync(p, 'utf8')));
+            } else {
+                Object.assign(cfg, JSON.parse(readFileSync(p, 'utf8')));
+            }
             return applyEnvOverrides(cfg);
         } catch {}
     }
@@ -261,7 +378,12 @@ function loadConfig() {
 
 function saveConfig(config) {
     ensureDir(CONFIG_DIR);
-    writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+    const p = getConfigFileForSave();
+    if (p.endsWith('.yaml') || p.endsWith('.yml')) {
+        writeFileSync(p, dumpSimpleYaml(config), 'utf8');
+    } else {
+        writeFileSync(p, JSON.stringify(config, null, 2), 'utf8');
+    }
 }
 
 const STT_PROVIDERS = {
@@ -498,7 +620,7 @@ async function interactiveSetup() {
     }
 
     saveConfig(config);
-    cprint(Colors.GREEN, `\n✅ Konfiguracja zapisana do ${CONFIG_FILE}`);
+    cprint(Colors.GREEN, `\n✅ Konfiguracja zapisana do ${getConfigFileForSave()}`);
 
     rl.close();
     return config;

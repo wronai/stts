@@ -28,6 +28,12 @@ cp .env.example .env
 ./stts.mjs
 ```
 
+Szybki setup (bez interakcji, Python):
+
+```bash
+./stts --init whisper_cpp:tiny
+```
+
 ## .env (ustawienia / linki / domyślne wartości)
 
 W repo jest `/.env.example` (oraz osobne `python/.env.example`, `nodejs/.env.example`).
@@ -36,6 +42,7 @@ Skrypty automatycznie wczytują `.env`.
 Najważniejsze zmienne:
 
 - `STTS_CONFIG_DIR` - katalog na modele/cache (również dla Docker volume)
+- `STTS_TIMEOUT` - czas nagrywania STT (sekundy), domyślnie `5`
 - `STTS_NLP2CMD_ENABLED=1` - włącza NL → komenda przez `nlp2cmd`
 - `STTS_NLP2CMD_ARGS=-r` - tryb jak w przykładach: `nlp2cmd -r "Pokaż użytkowników"`
 - `STTS_NLP2CMD_CONFIRM=1` - pytaj o potwierdzenie przed wykonaniem
@@ -62,8 +69,30 @@ Testy działają przez **symulację wypowiedzi usera**:
 3. W testach ustawiamy `STTS_MOCK_STT=1` i uruchamiamy `--stt-file ...`
 
 ```bash
+# wszystkie platformy
+make test-docker
+
+# albo osobno
 make docker-test-python
 make docker-test-nodejs
+```
+
+Testy Docker montują cache/config jako volume (żeby nie pobierać modeli za każdym razem).
+Domyślne katalogi cache:
+
+- `CACHE_DIR_PYTHON=~/.config/stts-python`
+- `CACHE_DIR_NODEJS=~/.config/stts-nodejs`
+
+Możesz je nadpisać:
+
+```bash
+make test-docker CACHE_DIR_PYTHON=/tmp/stts-python-cache CACHE_DIR_NODEJS=/tmp/stts-nodejs-cache
+```
+
+Alternatywnie (wrapper shell):
+
+```bash
+bash scripts/test_docker_all.sh --cache-python /tmp/stts-python-cache --cache-nodejs /tmp/stts-nodejs-cache
 ```
 
 ## ✨ Funkcje
@@ -166,6 +195,36 @@ brew install espeak sox
 # Ostatnia linijka output zostanie przeczytana na głos
 ```
 
+### STT placeholder (Python)
+
+W trybie wrapper możesz użyć `{STT}` jako placeholdera, który zostanie zastąpiony transkryptem z mikrofonu:
+
+```bash
+STTS_NLP2CMD_ENABLED=1 ./stts nlp2cmd -r "{STT}"
+```
+
+### Pipeline (jednorazowe STT → stdout, Python)
+
+Tryb `--stt-once` wypisuje sam transkrypt na stdout (a logi na stderr), więc nadaje się do pipe:
+
+```bash
+./stts --stt-once | xargs -I{} nlp2cmd -r "{}"
+```
+
+### Pipeline (TTS na końcu, Python)
+
+Jeśli chcesz, żeby dowolny pipeline kończył się TTS (np. przeczytanie ostatniej niepustej linii), użyj:
+
+```bash
+... | ./stts --tts-stdin
+```
+
+Przykład: zbuduj komendę i przeczytaj ją na głos (bez wykonania):
+
+```bash
+./stts --dry-run git commit -m "{STT}" | ./stts --tts-stdin
+```
+
 ### Makefile Integration
 
 ```makefile
@@ -184,8 +243,14 @@ brew install espeak sox
 # Interaktywny setup
 ./stts --setup
 
+# Jednolinijkowy setup (Python)
+./stts --init whisper_cpp:tiny
+
+# TTS w jednej linijce (Python)
+./stts --tts-provider espeak --tts-voice pl
+
 # Konfiguracja zapisywana w:
-~/.config/stts/config.json
+~/.config/stts-python/config.json
 ```
 
 ### Przykładowa konfiguracja
@@ -228,8 +293,14 @@ pip install vosk
 ### TTS: piper (neural, rekomendowany)
 
 ```bash
-# Auto-pobieranie przy setup
-# Głosy: pl_PL-gosia-medium, en_US-lessac-medium
+# Przykład (Python):
+./stts --tts-provider piper --tts-voice pl_PL-gosia-medium
+
+# albo podaj ścieżkę do modelu .onnx:
+./stts --tts-provider piper --tts-voice ~/.config/stts-python/models/piper/pl_PL-gosia-medium.onnx
+
+# Modele trzymane są w:
+~/.config/stts-python/models/piper/
 ```
 
 ### TTS: espeak (fallback)
