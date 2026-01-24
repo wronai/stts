@@ -1,0 +1,16 @@
+{
+  "name": "stts",
+  "version": "0.1.0",
+  "description": "Universal STT/TTS Shell Wrapper (Node.js)",
+  "type": "module",
+  "bin": {
+    "stts-node": "./stts.mjs"
+  },
+  "files": [
+    "stts.mjs",
+    "VERSION",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT"
+}

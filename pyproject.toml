@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stts"
+version = "0.1.0"
+description = "Universal STT/TTS Shell Wrapper"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { file = "LICENSE" }
+authors = [{ name = "wronai" }]
+keywords = ["stt", "tts", "cli"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+]
+
+[tool.setuptools]
+scripts = ["stts"]
+
+[tool.setuptools.package-data]
+"" = ["VERSION"]
