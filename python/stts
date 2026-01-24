@@ -35,6 +35,7 @@ import struct
 import contextlib
 import tempfile
 import re
+import signal
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional, List, Tuple
@@ -74,6 +75,12 @@ def load_dotenv() -> None:
 
 
 load_dotenv()
+
+# In pipeline usage, prefer default SIGPIPE behavior to avoid noisy BrokenPipeError
+try:
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+except Exception:
+    pass
 
 _CONFIG_DIR_ENV = os.environ.get("STTS_CONFIG_DIR")
 CONFIG_DIR = (Path(_CONFIG_DIR_ENV).expanduser() if _CONFIG_DIR_ENV else (Path.home() / ".config" / "stts-python"))
@@ -168,7 +175,10 @@ class Colors:
 
 
 def cprint(color: str, text: str, end: str = "\n"):
-    print(f"{color}{text}{Colors.NC}", end=end, flush=True)
+    try:
+        print(f"{color}{text}{Colors.NC}", end=end, flush=True)
+    except BrokenPipeError:
+        return
 
 
 def _download_progress(count, block_size, total_size):
@@ -1782,19 +1792,26 @@ def main():
         shell.run()
         return 0
 
+    if dry_run:
+        # pipeline-friendly: all logs/prompts to stderr; stdout contains ONLY the final command
+        with contextlib.redirect_stdout(sys.stderr):
+            expanded = expand_placeholders(rest, shell, config)
+            if expanded is None:
+                return 1
+            cmd = " ".join(expanded)
+            _, reason = check_command_safety(cmd, config, dry_run=True)
+        if reason == "dry-run":
+            try:
+                print(cmd)
+            except BrokenPipeError:
+                return 0
+            return 0
+
     expanded = expand_placeholders(rest, shell, config)
     if expanded is None:
         return 1
 
     cmd = " ".join(expanded)
-
-    if dry_run:
-        # pipeline-friendly: only command to stdout; prompts/logs should go to stderr
-        with contextlib.redirect_stdout(sys.stderr):
-            ok, reason = check_command_safety(cmd, config, dry_run=True)
-        if reason == "dry-run":
-            print(cmd)
-            return 0
 
     # Safety check
     ok, reason = check_command_safety(cmd, config, dry_run)

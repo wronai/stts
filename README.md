@@ -219,10 +219,20 @@ Jeśli chcesz, żeby dowolny pipeline kończył się TTS (np. przeczytanie ostat
 ... | ./stts --tts-stdin
 ```
 
+Uwaga: `{TTS}` nie jest wbudowaną komendą – jeśli chcesz mieć skrót, ustaw alias w swoim shellu (np. `alias TTS='stts --tts-stdin'`).
+
+Uwaga: aliasy (np. `TTS`) działają w Twoim shellu (bash/zsh), ale nie działają wewnątrz promptu `stts>`.
+
 Przykład: zbuduj komendę i przeczytaj ją na głos (bez wykonania):
 
 ```bash
 ./stts --dry-run git commit -m "{STT}" | ./stts --tts-stdin
+```
+
+Jeśli koniecznie chcesz użyć aliasu, uruchom w normalnym shellu (nie w `stts>`), ewentualnie przez:
+
+```bash
+bash -lc './stts --dry-run git commit -m "{STT}" | TTS'
 ```
 
 ### Makefile Integration
