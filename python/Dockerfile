@@ -9,6 +9,8 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY . /app
+RUN mkdir -p /app/samples \
+  && chmod -R a+rwX /app/samples
 
 ENV STTS_CONFIG_DIR=/stts-cache
 VOLUME ["/stts-cache"]

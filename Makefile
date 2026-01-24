@@ -1,9 +1,12 @@
 # stts - Universal Voice Shell
 # Makefile integration
 
-.PHONY: install test voice setup clean help setup-python setup-nodejs voice-python voice-nodejs gen-samples-python gen-samples-nodejs docker-build-python docker-build-nodejs docker-test-python docker-test-nodejs
+.PHONY: install test voice setup clean help setup-python setup-nodejs voice-python voice-nodejs gen-samples-python gen-samples-nodejs docker-build-python docker-build-nodejs docker-test-python docker-test-nodejs test-docker
 
 VERSION := $(shell cat VERSION 2>/dev/null || echo 0.0.0)
+
+CACHE_DIR_PYTHON ?= $(HOME)/.config/stts-python
+CACHE_DIR_NODEJS ?= $(HOME)/.config/stts-nodejs
 
 # Install stts globally (both versions)
 install:
@@ -59,10 +62,23 @@ docker-build-nodejs:
 	@$(MAKE) -C nodejs docker-build
 
 docker-test-python:
-	@$(MAKE) -C python docker-test
+	@$(MAKE) -C python docker-test CACHE_DIR=$(CACHE_DIR_PYTHON)
 
 docker-test-nodejs:
-	@$(MAKE) -C nodejs docker-test
+	@$(MAKE) -C nodejs docker-test CACHE_DIR=$(CACHE_DIR_NODEJS)
+
+test-docker:
+	@fail=0; \
+		echo "== docker-test-python =="; \
+		$(MAKE) docker-test-python || fail=1; \
+		echo "== docker-test-nodejs =="; \
+		$(MAKE) docker-test-nodejs || fail=1; \
+		if [ $$fail -eq 0 ]; then \
+			echo "✅ all docker tests passed"; \
+		else \
+			echo "❌ some docker tests failed"; \
+			exit 1; \
+		fi
 
 # Test TTS
 test-tts:
@@ -138,6 +154,7 @@ publish-npm:
 	@npm publish
 
 publish-pypi:
+	@rm -rf dist
 	@python3 -m build
 	@python3 -m twine upload dist/*
 

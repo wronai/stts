@@ -17,13 +17,40 @@ Każdy folder ma własne:
 ```bash
 # Python
 cd python
+cp .env.example .env
 ./stts --setup
 ./stts
 
 # Node.js
 cd nodejs
+cp .env.example .env
 ./stts.mjs --setup
 ./stts.mjs
+```
+
+## .env (ustawienia / linki / domyślne wartości)
+
+W repo jest `/.env.example` (oraz osobne `python/.env.example`, `nodejs/.env.example`).
+Skrypty automatycznie wczytują `.env`.
+
+Najważniejsze zmienne:
+
+- `STTS_CONFIG_DIR` - katalog na modele/cache (również dla Docker volume)
+- `STTS_NLP2CMD_ENABLED=1` - włącza NL → komenda przez `nlp2cmd`
+- `STTS_NLP2CMD_ARGS=-r` - tryb jak w przykładach: `nlp2cmd -r "Pokaż użytkowników"`
+- `STTS_NLP2CMD_CONFIRM=1` - pytaj o potwierdzenie przed wykonaniem
+
+## NLP2CMD (Natural Language → komendy)
+
+W wersji Python i Node możesz:
+
+- wpisać: `nlp Pokaż użytkowników`
+- albo użyć STT: ENTER → powiedz tekst → skrypt odpali `nlp2cmd` i zapyta o potwierdzenie
+
+Instalacja `nlp2cmd`:
+
+```bash
+cd python && make pip-nlp2cmd
 ```
 
 ## Testy w Docker (bez dostępu do audio)

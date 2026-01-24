@@ -49,7 +49,7 @@ def replace_version_in_pyproject(version: str) -> None:
     if not PYPROJECT_FILE.exists():
         return
     content = PYPROJECT_FILE.read_text(encoding="utf-8")
-    new_content, n = re.subn(r"(?m)^(version\s*=\s*)\"[^\"]+\"\s*$", rf"\\1\"{version}\"", content)
+    new_content, n = re.subn(r"(?m)^(version\s*=\s*)\"[^\"]+\"\s*$", rf"\1\"{version}\"", content)
     if n == 0:
         raise RuntimeError("Could not find project version in pyproject.toml")
     PYPROJECT_FILE.write_text(new_content, encoding="utf-8")
