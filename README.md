@@ -14,6 +14,20 @@ Każdy folder ma własne:
 
 ## Szybki start
 
+
+użycie STT i TTS w komendzie shell:
+
+```bash
+#tylko STT
+./stts git commit -m "{STT}"
+# razem z TTS 
+./stts git commit -m "{STT}" | ./stts --tts-stdin
+# z konfiguracją TTS
+./stts git commit -m "{STT}" | ./stts --tts-provider piper --tts-voice pl_PL-gosia-medium --tts-stdin
+```
+
+## Konfiguracja
+
 ```bash
 # Python
 cd python
@@ -33,6 +47,7 @@ Szybki setup (bez interakcji, Python):
 ```bash
 ./stts --init whisper_cpp:tiny
 ```
+
 
 ## .env (ustawienia / linki / domyślne wartości)
 
@@ -311,6 +326,20 @@ pip install vosk
 
 # Modele trzymane są w:
 ~/.config/stts-python/models/piper/
+```
+
+Wymagania:
+
+- `piper` w `PATH` (binarka)
+- model `*.onnx` w `~/.config/stts-python/models/piper/`
+- odtwarzacz audio: `paplay` lub `aplay` lub `play`
+
+Szybki check:
+
+```bash
+command -v piper
+ls ~/.config/stts-python/models/piper/*.onnx
+command -v paplay || command -v aplay || command -v play
 ```
 
 ### TTS: espeak (fallback)

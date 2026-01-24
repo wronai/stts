@@ -938,9 +938,17 @@ class PiperTTS(TTSProvider):
             return None
         p = Path(v).expanduser()
         if p.exists() and p.is_file():
+            cfg = Path(str(p) + ".json")
+            if not cfg.exists():
+                cprint(Colors.YELLOW, f"⚠️  Brak pliku config dla piper: {cfg}")
+                return None
             return str(p)
         p2 = MODELS_DIR / "piper" / f"{v}.onnx"
         if p2.exists():
+            cfg = Path(str(p2) + ".json")
+            if not cfg.exists():
+                cprint(Colors.YELLOW, f"⚠️  Brak pliku config dla piper: {cfg}")
+                return None
             return str(p2)
         return None
 
@@ -1321,13 +1329,29 @@ class VoiceShell:
 
     def _init_tts(self) -> Optional[TTSProvider]:
         provider = self.config.get("tts_provider")
+        voice = self.config.get("tts_voice", "pl")
+
         if provider in TTS_PROVIDERS:
             cls = TTS_PROVIDERS[provider]
-            available, _ = cls.is_available(self.info)
+            available, reason = cls.is_available(self.info)
             if available:
-                return cls(voice=self.config.get("tts_voice", "pl"))
+                inst = cls(voice=voice)
+                if provider == "piper":
+                    try:
+                        if not getattr(inst, "_resolve_model")():
+                            available, reason = False, "piper model not found"
+                    except Exception:
+                        available, reason = False, "piper model not found"
+                if available:
+                    return inst
+
+            # Explicit provider selected but not usable: be strict and disable TTS (avoid silent fallback).
+            print(f"[stts] ⚠️  TTS provider '{provider}' unavailable ({reason}); TTS disabled", file=sys.stderr)
+            return None
+
+        # No explicit provider selected: best-effort fallback
         if shutil.which("espeak") or shutil.which("espeak-ng"):
-            return EspeakTTS(self.config.get("tts_voice", "pl"))
+            return EspeakTTS(voice)
         return None
 
     def speak(self, text: str):
@@ -1739,7 +1763,9 @@ def tts_from_stdin(shell: "VoiceShell") -> int:
         print(f"[stts] TTS: provider={getattr(shell.tts, 'name', 'unknown')} voice={getattr(shell.tts, 'voice', '')}", file=sys.stderr)
     except Exception:
         pass
-    shell.tts.speak(text)
+    # Providers may print diagnostics via cprint(); keep pipeline stdout clean.
+    with contextlib.redirect_stdout(sys.stderr):
+        shell.tts.speak(text)
     return 0
 
 

@@ -108,6 +108,20 @@ Lepsze (neural) TTS przez `piper`:
 
 Modele `piper` możesz trzymać w `~/.config/stts-python/models/piper/` jako `*.onnx`.
 
+Wymagania dla `piper`:
+
+- binarka `piper` w `PATH`
+- model `*.onnx` w `~/.config/stts-python/models/piper/`
+- odtwarzacz audio: `paplay` lub `aplay` lub `play`
+
+Szybki check:
+
+```bash
+command -v piper
+ls ~/.config/stts-python/models/piper/*.onnx
+command -v paplay || command -v aplay || command -v play
+```
+
 Konfiguracja zapisywana jest w `~/.config/stts-python/config.json`.
 
 ## Komendy interaktywne (Y/n itd.)

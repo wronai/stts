@@ -158,4 +158,5 @@ publish-pypi:
 	@python3 -m build
 	@python3 -m twine upload dist/*
 
-publish: publish-npm publish-pypi
+publish: publish-pypi
+	@$(MAKE) publish-npm || true
