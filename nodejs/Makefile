@@ -1,5 +1,7 @@
 .PHONY: setup voice gen-samples docker-build docker-test help
 
+CACHE_DIR ?= $(HOME)/.config/stts-nodejs
+
 setup:
 	@./stts.mjs --setup
 
@@ -15,6 +17,16 @@ docker-build:
 docker-test:
 	@docker build -t stts-nodejs:latest .
 	@docker run --rm -t stts-nodejs:latest ./tests/docker_test.sh
+
+# Run interactively with cache mounted from host
+# Usage:
+#   make docker-run CACHE_DIR=~/.config/stts-nodejs
+docker-run:
+	@docker build -t stts-nodejs:latest .
+	@docker run --rm -it \
+		-e STTS_CONFIG_DIR=/stts-cache \
+		-v $(CACHE_DIR):/stts-cache \
+		stts-nodejs:latest node ./stts.mjs
 
 help:
 	@echo "stts (nodejs)"

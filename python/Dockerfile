@@ -10,6 +10,9 @@ RUN apt-get update \
 WORKDIR /app
 COPY . /app
 
+ENV STTS_CONFIG_DIR=/stts-cache
+VOLUME ["/stts-cache"]
+
 RUN chmod +x /app/stts /app/scripts/generate_samples.sh /app/tests/docker_test.sh
 
 CMD ["/app/tests/docker_test.sh"]

@@ -17,13 +17,15 @@
 
 import { spawn, execSync, spawnSync } from 'node:child_process';
 import { platform, homedir, cpus, totalmem, arch } from 'node:os';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, chmodSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, chmodSync, statSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { get as httpsGet } from 'node:https';
 import { createWriteStream } from 'node:fs';
 import { join, dirname } from 'node:path';
 
-const CONFIG_DIR = join(homedir(), '.config', 'stts-nodejs');
+const CONFIG_DIR = process.env.STTS_CONFIG_DIR
+    ? process.env.STTS_CONFIG_DIR
+    : join(homedir(), '.config', 'stts-nodejs');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
 const MODELS_DIR = join(CONFIG_DIR, 'models');
 const HISTORY_FILE = join(CONFIG_DIR, 'history');
@@ -215,6 +217,16 @@ const STT_PROVIDERS = {
             const whisperDir = join(MODELS_DIR, 'whisper.cpp');
             ensureDir(whisperDir);
 
+            const alreadyBuilt = [
+                join(whisperDir, 'build', 'bin', 'whisper-cli'),
+                join(whisperDir, 'build', 'bin', 'main'),
+                join(whisperDir, 'main'),
+            ].some((p) => existsSync(p));
+            if (alreadyBuilt) {
+                cprint(Colors.GREEN, '✅ whisper.cpp already installed!');
+                return true;
+            }
+
             try {
                 if (!existsSync(join(whisperDir, 'Makefile'))) {
                     execSync(`git clone https://github.com/ggerganov/whisper.cpp "${whisperDir}"`, { stdio: 'inherit' });
@@ -235,9 +247,27 @@ const STT_PROVIDERS = {
             }
 
             const [name, url, size] = modelInfo;
-            const modelPath = join(MODELS_DIR, 'whisper.cpp', `ggml-${name}.bin`);
+            const expectedBytes = Math.floor(Number(size) * 1024 * 1024 * 1024);
+            const goodSize = (p) => {
+                try {
+                    const n = statSync(p).size;
+                    return Number.isFinite(n) && n > Math.max(1024 * 1024, Math.floor(expectedBytes * 0.9));
+                } catch {
+                    return false;
+                }
+            };
+            let modelPath;
+            if (name === 'large') {
+                const p2 = join(MODELS_DIR, 'whisper.cpp', 'ggml-large-v3.bin');
+                const p1 = join(MODELS_DIR, 'whisper.cpp', 'ggml-large.bin');
+                if (existsSync(p2) && goodSize(p2)) return p2;
+                if (existsSync(p1) && goodSize(p1)) return p1;
+                modelPath = p2;
+            } else {
+                modelPath = join(MODELS_DIR, 'whisper.cpp', `ggml-${name}.bin`);
+            }
 
-            if (existsSync(modelPath)) {
+            if (existsSync(modelPath) && goodSize(modelPath)) {
                 cprint(Colors.GREEN, `✅ Model ${name} already downloaded`);
                 return modelPath;
             }
@@ -255,12 +285,32 @@ const STT_PROVIDERS = {
         transcribe: async (audioPath, model, language) => {
             let whisperBin = which('whisper-cpp') || which('main');
             if (!whisperBin) {
-                whisperBin = join(MODELS_DIR, 'whisper.cpp', 'main');
+                const candidates = [
+                    join(MODELS_DIR, 'whisper.cpp', 'build', 'bin', 'whisper-cli'),
+                    join(MODELS_DIR, 'whisper.cpp', 'build', 'bin', 'main'),
+                    join(MODELS_DIR, 'whisper.cpp', 'main'),
+                ];
+                whisperBin = candidates.find((p) => existsSync(p)) || join(MODELS_DIR, 'whisper.cpp', 'main');
             }
 
-            const modelPath = join(MODELS_DIR, 'whisper.cpp', `ggml-${model || 'base'}.bin`);
+            const modelName = model || 'base';
+            let modelPath;
+            if (modelName === 'large') {
+                const p2 = join(MODELS_DIR, 'whisper.cpp', 'ggml-large-v3.bin');
+                const p1 = join(MODELS_DIR, 'whisper.cpp', 'ggml-large.bin');
+                modelPath = existsSync(p2) ? p2 : p1;
+            } else {
+                modelPath = join(MODELS_DIR, 'whisper.cpp', `ggml-${modelName}.bin`);
+            }
             if (!existsSync(modelPath)) {
-                await STT_PROVIDERS.whisper_cpp.downloadModel(model || 'base');
+                await STT_PROVIDERS.whisper_cpp.downloadModel(modelName);
+                if (modelName === 'large') {
+                    const p2 = join(MODELS_DIR, 'whisper.cpp', 'ggml-large-v3.bin');
+                    const p1 = join(MODELS_DIR, 'whisper.cpp', 'ggml-large.bin');
+                    modelPath = existsSync(p2) ? p2 : p1;
+                } else {
+                    modelPath = join(MODELS_DIR, 'whisper.cpp', `ggml-${modelName}.bin`);
+                }
             }
 
             try {
