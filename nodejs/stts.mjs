@@ -387,14 +387,25 @@ async function speak(text, config) {
 }
 
 async function listen(config, sttFile = null) {
+    const audioPath = sttFile || recordAudio(config.timeout || 5);
+    if (!audioPath) return '';
+
+    if (process.env.STTS_MOCK_STT === '1') {
+        const sidecar = `${audioPath}.txt`;
+        if (existsSync(sidecar)) {
+            try {
+                return readFileSync(sidecar, 'utf8').trim();
+            } catch {
+                return '';
+            }
+        }
+    }
+
     const provider = config.stt_provider && STT_PROVIDERS[config.stt_provider];
     if (!provider) {
         cprint(Colors.YELLOW, '⚠️  STT nie skonfigurowany. Uruchom: ./stts.mjs --setup');
         return '';
     }
-
-    const audioPath = sttFile || recordAudio(config.timeout || 5);
-    if (!audioPath) return '';
 
     cprint(Colors.YELLOW, '🔄 Rozpoznawanie... ', false);
     const text = await provider.transcribe(audioPath, config.stt_model, config.language || 'pl');

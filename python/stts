@@ -417,6 +417,13 @@ class VoiceShell:
             threading.Thread(target=self.tts.speak, args=(text[:200],), daemon=True).start()
 
     def transcribe(self, audio_path: str) -> str:
+        if os.environ.get("STTS_MOCK_STT") == "1":
+            sidecar = Path(audio_path).with_suffix(Path(audio_path).suffix + ".txt")
+            if sidecar.exists():
+                try:
+                    return sidecar.read_text(encoding="utf-8").strip()
+                except Exception:
+                    return ""
         if not self.stt:
             return ""
         cprint(Colors.YELLOW, "🔄 Rozpoznawanie...", end=" ")

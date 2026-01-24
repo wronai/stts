@@ -1180,14 +1180,9 @@ def main():
     if config.get("stt_provider") is None and config.get("tts_provider") is None:
         if len(sys.argv) == 1 or "--setup" in sys.argv:
             config = interactive_setup()
-    
-    # Parse args
-    if len(sys.argv) == 1:
-        # Interactive shell
-        shell = VoiceShell(config)
-        shell.run()
     elif "--setup" in sys.argv:
         interactive_setup()
+        return
     elif "--help" in sys.argv or "-h" in sys.argv:
         print(__doc__)
         print("\nOpcje:")
@@ -1198,6 +1193,10 @@ def main():
         print("  stts                    # Voice shell")
         print("  stts make build         # Uruchom z głosowym output")
         print("  stts python script.py   # Dowolna komenda")
+    elif len(sys.argv) == 1:
+        # Interactive shell
+        shell = VoiceShell(config)
+        shell.run()
     else:
         # Command wrapper
         exit(run_with_voice(sys.argv[1:], config))

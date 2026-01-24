@@ -1,16 +1,16 @@
 # stts - Universal Voice Shell
 # Makefile integration
 
-.PHONY: install test voice setup clean help
+.PHONY: install test voice setup clean help setup-python setup-nodejs voice-python voice-nodejs gen-samples-python gen-samples-nodejs docker-build-python docker-build-nodejs docker-test-python docker-test-nodejs
 
 VERSION := $(shell cat VERSION 2>/dev/null || echo 0.0.0)
 
 # Install stts globally (both versions)
 install:
-	@echo "🔧 Installing stts..."
-	@chmod +x stts stts.mjs
-	@sudo ln -sf $(shell pwd)/stts /usr/local/bin/stts
-	@sudo ln -sf $(shell pwd)/stts.mjs /usr/local/bin/stts-node
+	@echo "Installing stts..."
+	@chmod +x python/stts nodejs/stts.mjs
+	@sudo ln -sf $(shell pwd)/python/stts /usr/local/bin/stts
+	@sudo ln -sf $(shell pwd)/nodejs/stts.mjs /usr/local/bin/stts-node
 	@echo "✅ Installed! Run: stts (Python) or stts-node (Node.js)"
 
 # Install dependencies (Linux)
@@ -32,6 +32,37 @@ voice:
 
 voice-node:
 	@./stts.mjs
+
+# Delegation targets for split projects
+setup-python:
+	@$(MAKE) -C python setup
+
+setup-nodejs:
+	@$(MAKE) -C nodejs setup
+
+voice-python:
+	@$(MAKE) -C python voice
+
+voice-nodejs:
+	@$(MAKE) -C nodejs voice
+
+gen-samples-python:
+	@$(MAKE) -C python gen-samples
+
+gen-samples-nodejs:
+	@$(MAKE) -C nodejs gen-samples
+
+docker-build-python:
+	@$(MAKE) -C python docker-build
+
+docker-build-nodejs:
+	@$(MAKE) -C nodejs docker-build
+
+docker-test-python:
+	@$(MAKE) -C python docker-test
+
+docker-test-nodejs:
+	@$(MAKE) -C nodejs docker-test
 
 # Test TTS
 test-tts:

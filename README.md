@@ -1,16 +1,42 @@
 # 🎙️ stts - Universal Voice Shell
 
-**STT + TTS shell wrapper** - uruchamiaj dowolne komendy głosem!
+Repo zostało podzielone na **dwa niezależne projekty**:
+
+- **`python/`** - wersja Python
+- **`nodejs/`** - wersja Node.js (ESM)
+
+Każdy folder ma własne:
+
+- `README.md`
+- `Makefile`
+- `Dockerfile`
+- testy Docker (bez mikrofonu)
+
+## Szybki start
 
 ```bash
-# Python version
-./stts                    # Voice shell
-./stts make build         # Komenda z głosowym output
-./stts --setup            # Konfiguracja
+# Python
+cd python
+./stts --setup
+./stts
 
-# Node.js version (alternatywa)
-./stts.mjs                # Voice shell
-./stts.mjs make build     # Komenda z głosowym output
+# Node.js
+cd nodejs
+./stts.mjs --setup
+./stts.mjs
+```
+
+## Testy w Docker (bez dostępu do audio)
+
+Testy działają przez **symulację wypowiedzi usera**:
+
+1. Generujemy próbki audio do plików `samples/*.wav`
+2. Do każdej próbki zapisujemy transkrypt w `samples/*.wav.txt`
+3. W testach ustawiamy `STTS_MOCK_STT=1` i uruchamiamy `--stt-file ...`
+
+```bash
+make docker-test-python
+make docker-test-nodejs
 ```
 
 ## ✨ Funkcje
@@ -40,12 +66,11 @@ sudo ln -s $(pwd)/stts.mjs /usr/local/bin/stts-node
 
 ## 🔄 Python vs Node.js
 
-| Cecha | Python (`stts`) | Node.js (`stts.mjs`) |
-|-------|-----------------|----------------------|
+| Cecha | Python (`python/stts`) | Node.js (`nodejs/stts.mjs`) |
+|-------|-------------------------|----------------------------|
 | Wymagania | Python 3.8+ | Node.js 18+ |
 | Windows | ✅ Pełne | ⚠️ Częściowe |
 | Linux/macOS | ✅ | ✅ |
-| Rozmiar | 25 KB | 20 KB |
 | Zależności | 0 (stdlib) | 0 (stdlib) |
 
 ### Zależności systemowe
@@ -233,23 +258,28 @@ mv ggml-small.bin ~/.config/stts/models/whisper.cpp/
 
 ```
 stts/
-├── stts                 # Python version
-├── stts.mjs             # Node.js version
-├── Makefile             # Make integration
-└── README.md
+├── python/
+│   ├── stts
+│   ├── README.md
+│   ├── Makefile
+│   ├── Dockerfile
+│   ├── samples/
+│   ├── scripts/
+│   └── tests/
+└── nodejs/
+    ├── stts.mjs
+    ├── README.md
+    ├── Makefile
+    ├── Dockerfile
+    ├── samples/
+    ├── scripts/
+    └── tests/
 
-~/.config/stts/
-├── config.json          # Konfiguracja (wspólna)
-├── history              # Historia komend
-└── models/
-    ├── whisper.cpp/     # Modele whisper
-    │   ├── main         # Binary
-    │   └── ggml-*.bin   # Modele
-    ├── piper/           # Piper TTS
-    │   └── voices/      # Głosy
-    └── vosk/            # Modele vosk
+~/.config/
+├── stts-python/   # config + models dla Python
+└── stts-nodejs/   # config + models dla Node.js
 ```
 
 ## 📜 Licencja
 
-MIT
+Apache 2.0
