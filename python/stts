@@ -908,12 +908,19 @@ class EspeakTTS(TTSProvider):
 
     def speak(self, text: str) -> None:
         cmd = shutil.which("espeak-ng") or shutil.which("espeak")
-        if cmd:
-            subprocess.run(
+        if not cmd:
+            cprint(Colors.YELLOW, "⚠️  Brak espeak/espeak-ng")
+            return
+        try:
+            res = subprocess.run(
                 [cmd, "-v", self.voice, "-s", "160", text],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+            if getattr(res, "returncode", 0) != 0:
+                cprint(Colors.YELLOW, f"⚠️  espeak returncode={res.returncode}")
+        except Exception:
+            return
 
 
 class PiperTTS(TTSProvider):
@@ -944,9 +951,11 @@ class PiperTTS(TTSProvider):
             return
         try:
             if Path(player).name == "play":
-                subprocess.run([player, "-q", wav_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                res = subprocess.run([player, "-q", wav_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             else:
-                subprocess.run([player, wav_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                res = subprocess.run([player, wav_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if getattr(res, "returncode", 0) != 0:
+                cprint(Colors.YELLOW, f"⚠️  audio player returncode={res.returncode}")
         except Exception:
             return
 
@@ -954,6 +963,7 @@ class PiperTTS(TTSProvider):
         piper = shutil.which("piper")
         model = self._resolve_model()
         if not piper:
+            cprint(Colors.YELLOW, "⚠️  Brak binarki piper w PATH")
             return
         if not model:
             cprint(Colors.YELLOW, "⚠️  Piper model nie ustawiony. Ustaw tts_voice na ścieżkę do .onnx lub nazwę z ~/.config/stts-python/models/piper/")
@@ -961,7 +971,7 @@ class PiperTTS(TTSProvider):
         try:
             with tempfile.NamedTemporaryFile(prefix="stts_piper_", suffix=".wav", delete=False) as f:
                 out_path = f.name
-            subprocess.run(
+            res = subprocess.run(
                 [piper, "--model", model, "--output_file", out_path],
                 input=text,
                 text=True,
@@ -969,6 +979,8 @@ class PiperTTS(TTSProvider):
                 stderr=subprocess.DEVNULL,
                 timeout=60,
             )
+            if getattr(res, "returncode", 0) != 0:
+                cprint(Colors.YELLOW, f"⚠️  piper returncode={res.returncode}")
             self._play_wav(out_path)
         except Exception:
             return
@@ -1721,8 +1733,12 @@ def tts_from_stdin(shell: "VoiceShell") -> int:
 
     text = lines[-1][:200]
     if not shell.tts:
-        cprint(Colors.YELLOW, "⚠️  TTS nie jest dostępny (brak konfiguracji lub brak binarki providera)")
+        print("[stts] TTS not available (check tts_provider/tts_voice and provider binaries)", file=sys.stderr)
         return 0
+    try:
+        print(f"[stts] TTS: provider={getattr(shell.tts, 'name', 'unknown')} voice={getattr(shell.tts, 'voice', '')}", file=sys.stderr)
+    except Exception:
+        pass
     shell.tts.speak(text)
     return 0
 
