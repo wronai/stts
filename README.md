@@ -30,6 +30,16 @@ użycie STT i TTS w komendzie shell:
 ./stts git commit -m "{STT}" | ./stts --tts-provider piper --tts-voice pl_PL-gosia-medium --tts-stdin
 ```
 
+Uruchamianie komend shell nawet z błedami fonetycznymi za pomocą nlp2cmd:
+```bash
+./stts nlp2cmd -r "{STT}"  | ./stts --tts-stdin
+```
+
+output
+```bash
+
+```
+
 **Uwaga:** `./stts` wykonuje komendę z buforowaniem – output pojawi się naraz po zakończeniu. Jeśli potrzebujesz strumieniowanie (np. `git`), użyj `--dry-run | bash` lub `git commit -m "$(./stts --stt-once)"`.
 
 ```bash

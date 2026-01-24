@@ -1585,6 +1585,30 @@ class VoiceShell:
         except Exception as e:
             return f"❌ Error: {e}", 1
 
+    def run_command_streaming(self, cmd: str):
+        """Strumieniowe wykonanie komendy z wypisywaniem linia po linii."""
+        import shlex
+        try:
+            # Użyj Popen z stdout=PIPE do strumieniowania
+            process = subprocess.Popen(
+                cmd if isinstance(cmd, list) else shlex.split(cmd),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,  # line buffering
+                universal_newlines=True
+            )
+            output_parts = []
+            for line in iter(process.stdout.readline, ''):
+                if line:
+                    print(line, end='', flush=True)
+                    output_parts.append(line)
+            process.stdout.close()
+            return_code = process.wait()
+            return ''.join(output_parts), return_code
+        except Exception as e:
+            return f"❌ Error: {e}", 1
+
     def run_command_any(self, cmd: str):
         # If pexpect exists, support interactive prompts with TTS + voice reply.
         if sys.stdin.isatty() and _has_pexpect():
@@ -1592,6 +1616,10 @@ class VoiceShell:
                 return self.run_command_interactive(cmd)
             except Exception:
                 pass
+        # W pipe (nie-TTY) użyj strumieniowania
+        if not sys.stdin.isatty():
+            out, code = self.run_command_streaming(cmd)
+            return out, code, False
         out, code = self.run_command(cmd)
         return out, code, False
 
@@ -2026,9 +2054,9 @@ def main():
             translated = nlp2cmd_translate(text)
             if translated and nlp2cmd_confirm(translated):
                 text = translated
-            out, code = shell.run_command(text)
+            out, code, interactive = shell.run_command_any(text)
             if out.strip():
-                print(out)
+                print(out, end="", flush=True)
             return code
         return 1
 
@@ -2062,9 +2090,9 @@ def main():
     if not ok:
         return 0 if reason == "dry-run" else 1
 
-    out, code = shell.run_command(cmd)
+    out, code, interactive = shell.run_command_any(cmd)
     if out.strip():
-        print(out)
+        print(out, end="", flush=True)
     lines = [l.strip() for l in out.splitlines() if l.strip()]
     if lines and shell.tts and config.get("auto_tts", True):
         shell.tts.speak(lines[-1][:200])
