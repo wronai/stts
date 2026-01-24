@@ -30,14 +30,48 @@ użycie STT i TTS w komendzie shell:
 ./stts git commit -m "{STT}" | ./stts --tts-provider piper --tts-voice pl_PL-gosia-medium --tts-stdin
 ```
 
-Uruchamianie komend shell nawet z błedami fonetycznymi za pomocą nlp2cmd:
+Uruchamianie komend shell nawet z błędami fonetycznymi za pomocą nlp2cmd:
 ```bash
-./stts nlp2cmd -r "{STT}"  | ./stts --tts-stdin
+./stts nlp2cmd -r "{STT}" --auto-confirm | ./stts --tts-stdin
 ```
 
 output
 ```bash
+[13:14:01] 🎤 Mów (max 5s, VAD)... ✅ VAD stop (3.4s / 3.7s)
+🔎 audio: 3.4s, rms=-37.4dBFS
+[13:14:05] 🔄 Rozpoznawanie... ✅ "lista folderów" (5.5s)
+╭─────────────────────────────────────────────────────────────────────────────────────────────────────────────── 🚀 Run Mode ────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ lista folderów                                                                                                                                                                                                                             │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 
+Generating command...
+Detected: shell/list
+
+$ ls -la .
+  total 108
+  drwxrwxr-x 10 tom tom  4096 Jan 24 13:13 .
+  drwxrwxr-x 31 tom tom  4096 Jan 24 09:33 ..
+  -rw-r--r--  1 tom tom  1512 Jan 24 12:12 .env.example
+  drwxrwxr-x  7 tom tom  4096 Jan 24 13:06 .git
+  -rw-r--r--  1 tom tom  1664 Jan 24 10:34 .gitignore
+  drwxrwxr-x  3 tom tom  4096 Jan 24 12:29 .idea
+  -rw-rw-r--  1 tom tom 11357 Jan 24 09:33 LICENSE
+  -rw-r--r--  1 tom tom  4658 Jan 24 12:21 Makefile
+  -rw-rw-r--  1 tom tom 12421 Jan 24 13:13 README.md
+  -rw-r--r--  1 tom tom     7 Jan 24 13:05 VERSION
+  -rw-r--r--  1 tom tom  2291 Jan 24 12:20 bump_version.py
+  drwxrwxr-x  2 tom tom  4096 Jan 24 13:05 dist
+  drwxrwxr-x  5 tom tom  4096 Jan 24 10:38 nodejs
+  -rw-r--r--  1 tom tom   300 Jan 24 13:05 package.json
+  -rw-r--r--  1 tom tom   514 Jan 24 13:05 pyproject.toml
+  drwxr-xr-x  7 tom tom  4096 Jan 24 10:43 python
+  drwxr-xr-x  2 tom tom  4096 Jan 24 10:57 scripts
+  -rwxr-xr-x  1 tom tom   573 Jan 24 10:11 stts
+  drwxrwxr-x  2 tom tom  4096 Jan 24 13:05 stts.egg-info
+  -rwxr-xr-x  1 tom tom   462 Jan 24 10:11 stts.mjs
+  drwxrwxr-x  5 tom tom  4096 Jan 24 10:56 venv
+✓ Command completed in 9.1ms
+[stts] TTS: provider=piper voice=en_US-amy-medium
 ```
 
 **Uwaga:** `./stts` wykonuje komendę z buforowaniem – output pojawi się naraz po zakończeniu. Jeśli potrzebujesz strumieniowanie (np. `git`), użyj `--dry-run | bash` lub `git commit -m "$(./stts --stt-once)"`.
