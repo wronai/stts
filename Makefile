@@ -5,6 +5,9 @@
 
 VERSION := $(shell cat VERSION 2>/dev/null || echo 0.0.0)
 
+PYTHON ?= python3
+PIP ?= $(PYTHON) -m pip
+
 CACHE_DIR_PYTHON ?= $(HOME)/.config/stts-python
 CACHE_DIR_NODEJS ?= $(HOME)/.config/stts-nodejs
 
@@ -153,10 +156,16 @@ bump-major:
 publish-npm:
 	@npm publish
 
-publish-pypi:
+ensure-pypi-tools:
+	@$(PYTHON) -c "import build, twine" >/dev/null 2>&1 || ( \
+		echo "Installing PyPI tools (build, twine)..."; \
+		$(PIP) install -U build twine \
+	)
+
+publish-pypi: bump-patch ensure-pypi-tools
 	@rm -rf dist
-	@python3 -m build
-	@python3 -m twine upload dist/*
+	@$(PYTHON) -m build
+	@$(PYTHON) -m twine upload dist/*
 
 publish: publish-pypi
 	@$(MAKE) publish-npm || true
