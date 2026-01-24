@@ -1720,8 +1720,10 @@ def tts_from_stdin(shell: "VoiceShell") -> int:
         return 0
 
     text = lines[-1][:200]
-    if shell.tts:
-        shell.tts.speak(text)
+    if not shell.tts:
+        cprint(Colors.YELLOW, "⚠️  TTS nie jest dostępny (brak konfiguracji lub brak binarki providera)")
+        return 0
+    shell.tts.speak(text)
     return 0
 
 
@@ -1751,7 +1753,7 @@ def main():
         save_config(config)
         cprint(Colors.GREEN, f"✅ Saved TTS: provider={config.get('tts_provider')} voice={config.get('tts_voice')}")
         # If user only wanted to configure TTS, exit.
-        if not (init or setup or stt_once or stt_file or rest):
+        if not (init or setup or stt_once or stt_file or rest or tts_stdin):
             return 0
 
     if init:
