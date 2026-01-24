@@ -162,7 +162,7 @@ ensure-pypi-tools:
 		$(PIP) install -U build twine \
 	)
 
-publish-pypi: bump-patch ensure-pypi-tools
+publish-pypi: ensure-pypi-tools
 	@rm -rf dist
 	@$(PYTHON) -m build
 	@$(PYTHON) -m twine upload dist/*
