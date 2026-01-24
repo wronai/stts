@@ -1,55 +1,31 @@
 #!/usr/bin/env python3
-"""
-stts - Universal STT/TTS Shell Wrapper
-Cross-platform voice shell with automatic model download and hardware detection.
+"""stts (root wrapper)
 
-Usage:
-    stts                    # Interactive voice shell
-    stts --setup            # Configure STT/TTS providers
-    stts [command] [args]   # Run command with voice output
+Ten plik jest cienkim wrapperem delegującym do `python/stts`.
+
+Użycie:
+  ./stts                 # uruchamia python/stts
+  ./stts --setup
+  ./stts --help
 """
 
 import os
 import sys
-import json
-import subprocess
-import platform
-import shutil
-import urllib.request
-import tarfile
-import zipfile
-import tempfile
-import threading
-import readline
-import atexit
 from pathlib import Path
-from dataclasses import dataclass
-from typing import Optional, Callable, List, Tuple, Dict, Any
 
-__version__ = "0.0.0"
-try:
-    __version__ = (Path(__file__).resolve().parent / "VERSION").read_text(encoding="utf-8").strip()
-except Exception:
-    pass
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# CONFIGURATION
-# ═══════════════════════════════════════════════════════════════════════════════
+def main() -> int:
+    root = Path(__file__).resolve().parent
+    target = root / "python" / "stts"
+    if not target.exists():
+        print("❌ Missing ./python/stts (repo structure broken)", file=sys.stderr)
+        return 1
+    os.execv(sys.executable, [sys.executable, str(target), *sys.argv[1:]])
+    return 1
 
-CONFIG_DIR = Path.home() / ".config" / "stts"
-CONFIG_FILE = CONFIG_DIR / "config.json"
-MODELS_DIR = CONFIG_DIR / "models"
-HISTORY_FILE = CONFIG_DIR / "history"
 
-DEFAULT_CONFIG = {
-    "stt_provider": None,
-    "tts_provider": None,
-    "stt_model": None,
-    "tts_voice": "pl",
-    "language": "pl",
-    "timeout": 5,
-    "auto_tts": True,
-}
+if __name__ == "__main__":
+    raise SystemExit(main())
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # COLORS
