@@ -163,6 +163,7 @@ ensure-pypi-tools:
 	)
 
 publish-pypi: ensure-pypi-tools
+	@$(PYTHON) bump_version.py patch
 	@rm -rf dist
 	@$(PYTHON) -m build
 	@$(PYTHON) -m twine upload dist/*
