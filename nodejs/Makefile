@@ -33,4 +33,9 @@ help:
 	@echo "  make setup         - setup wizard"
 	@echo "  make voice         - interactive voice shell"
 	@echo "  make gen-samples   - generate WAV samples"
+	@echo "  make pip-nlp2cmd   - install nlp2cmd (used for NL -> cmd)"
 	@echo "  make docker-test   - run tests in docker (no mic)"
+
+pip-nlp2cmd:
+	@echo "Installing nlp2cmd (python package)..."
+	@python3 -m pip install -U nlp2cmd

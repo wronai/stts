@@ -4,10 +4,11 @@
   "description": "Universal STT/TTS Shell Wrapper (Node.js)",
   "type": "module",
   "bin": {
-    "stts-node": "./stts.mjs"
+    "stts-node": "./nodejs/stts.mjs"
   },
   "files": [
     "stts.mjs",
+    "nodejs/stts.mjs",
     "VERSION",
     "README.md",
     "LICENSE"

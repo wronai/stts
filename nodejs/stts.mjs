@@ -22,6 +22,41 @@ import { createInterface } from 'node:readline';
 import { get as httpsGet } from 'node:https';
 import { createWriteStream } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+function loadDotenv() {
+    const candidates = [];
+    try {
+        const here = dirname(fileURLToPath(import.meta.url));
+        candidates.push(join(process.cwd(), '.env'));
+        candidates.push(join(here, '.env'));
+        candidates.push(join(here, '..', '.env'));
+    } catch {}
+
+    for (const p of candidates) {
+        try {
+            if (!existsSync(p)) continue;
+            const txt = readFileSync(p, 'utf8');
+            for (const line of txt.split(/\r?\n/)) {
+                let s = line.trim();
+                if (!s || s.startsWith('#')) continue;
+                if (s.toLowerCase().startsWith('export ')) s = s.slice(7).trim();
+                const idx = s.indexOf('=');
+                if (idx <= 0) continue;
+                const k = s.slice(0, idx).trim();
+                let v = s.slice(idx + 1).trim();
+                if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+                    v = v.slice(1, -1);
+                }
+                if (!k) continue;
+                if (process.env[k] === undefined) process.env[k] = v;
+            }
+            break;
+        } catch {}
+    }
+}
+
+loadDotenv();
 
 const CONFIG_DIR = process.env.STTS_CONFIG_DIR
     ? process.env.STTS_CONFIG_DIR
@@ -40,6 +75,16 @@ const DEFAULT_CONFIG = {
     auto_tts: true,
 };
 
+function applyEnvOverrides(config) {
+    if (process.env.STTS_TIMEOUT) {
+        const n = Number(process.env.STTS_TIMEOUT);
+        if (Number.isFinite(n)) config.timeout = n;
+    }
+    if (process.env.STTS_LANGUAGE) config.language = String(process.env.STTS_LANGUAGE).trim() || config.language;
+    if (process.env.STTS_TTS_VOICE) config.tts_voice = String(process.env.STTS_TTS_VOICE).trim() || config.tts_voice;
+    return config;
+}
+
 const Colors = {
     RED: '\x1b[0;31m',
     GREEN: '\x1b[0;32m',
@@ -53,6 +98,37 @@ const Colors = {
 
 function cprint(color, text, newline = true) {
     process.stdout.write(`${color}${text}${Colors.NC}${newline ? '\n' : ''}`);
+}
+
+function nlp2cmdTranslate(text) {
+    const enabled = String(process.env.STTS_NLP2CMD_ENABLED || '0').trim().toLowerCase();
+    if (!['1', 'true', 'yes', 'y'].includes(enabled)) return null;
+
+    const bin = process.env.STTS_NLP2CMD_BIN || 'nlp2cmd';
+    const args = (process.env.STTS_NLP2CMD_ARGS || '-r').split(/\s+/).filter(Boolean);
+
+    const res = spawnSync(bin, [...args, text], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const out = String(res.stdout || '') + String(res.stderr || '');
+    const lines = out.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (!lines.length) return null;
+
+    // heuristic: first plausible command line
+    for (const l of lines) {
+        if (l.startsWith('```')) continue;
+        if (l.startsWith('📊')) continue;
+        if (/^\$\s/.test(l)) return l.replace(/^\$\s*/, '');
+        if (/[;&|]/.test(l) || l.includes(' ') || /^[a-zA-Z0-9_-]+$/.test(l)) return l;
+    }
+    return lines[0];
+}
+
+function nlp2cmdConfirm(cmd) {
+    const confirm = String(process.env.STTS_NLP2CMD_CONFIRM || '1').trim().toLowerCase();
+    if (['0', 'false', 'no', 'n'].includes(confirm)) return true;
+    process.stdout.write(`\nNLP2CMD → ${cmd}\n`);
+    const ans = spawnSync(process.platform === 'win32' ? 'cmd' : 'bash', ['-lc', 'read -r -p "Uruchomić tę komendę? (y/n): " a; echo $a'], { encoding: 'utf8' });
+    const a = String(ans.stdout || '').trim().toLowerCase();
+    return a === 'y';
 }
 
 function which(cmd) {
@@ -176,10 +252,11 @@ function loadConfig() {
     ensureDir(CONFIG_DIR);
     if (existsSync(CONFIG_FILE)) {
         try {
-            return JSON.parse(readFileSync(CONFIG_FILE, 'utf8'));
+            const cfg = { ...DEFAULT_CONFIG, ...JSON.parse(readFileSync(CONFIG_FILE, 'utf8')) };
+            return applyEnvOverrides(cfg);
         } catch {}
     }
-    return { ...DEFAULT_CONFIG };
+    return applyEnvOverrides({ ...DEFAULT_CONFIG });
 }
 
 function saveConfig(config) {
@@ -503,11 +580,29 @@ async function voiceShell(config) {
                 return;
             }
 
+            if (cmd.startsWith('nlp ')) {
+                const nl = cmd.slice(4).trim();
+                if (!nl) {
+                    prompt();
+                    return;
+                }
+                const translated = nlp2cmdTranslate(nl);
+                if (!translated || !nlp2cmdConfirm(translated)) {
+                    prompt();
+                    return;
+                }
+                cmd = translated;
+            }
+
             if (!cmd) {
                 cmd = await listen(config);
                 if (!cmd) {
                     prompt();
                     return;
+                }
+                const translated = nlp2cmdTranslate(cmd);
+                if (translated && nlp2cmdConfirm(translated)) {
+                    cmd = translated;
                 }
             }
 
@@ -585,7 +680,10 @@ async function main() {
             process.exit(shellText ? 0 : 1);
         }
         if (!shellText) process.exit(1);
-        const { output, code } = await runCommand(shellText);
+        let cmd = shellText;
+        const translated = nlp2cmdTranslate(cmd);
+        if (translated && nlp2cmdConfirm(translated)) cmd = translated;
+        const { output, code } = await runCommand(cmd);
         if (output.trim()) console.log(output);
         process.exit(code);
     }

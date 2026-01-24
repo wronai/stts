@@ -36,4 +36,14 @@ help:
 	@echo "  make setup         - setup wizard"
 	@echo "  make voice         - interactive voice shell"
 	@echo "  make gen-samples   - generate WAV samples"
+	@echo "  make pip-nlp2cmd   - install nlp2cmd (example NLP interface)"
+	@echo "  make pip-extras    - install optional voice/automation libs (examples)"
 	@echo "  make docker-test   - run tests in docker (no mic)"
+
+pip-nlp2cmd:
+	@echo "Installing nlp2cmd..."
+	@python3 -m pip install -U nlp2cmd
+
+pip-extras:
+	@echo "Installing optional libraries..."
+	@python3 -m pip install -U pexpect SpeechRecognition pyaudio playwright pyautogui

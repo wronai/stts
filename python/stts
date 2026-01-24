@@ -29,9 +29,46 @@ import readline
 import atexit
 import wave
 import math
+import shlex
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional, List, Tuple
+
+
+def load_dotenv() -> None:
+    candidates = []
+    try:
+        here = Path(__file__).resolve().parent
+        candidates.append(Path.cwd() / ".env")
+        candidates.append(here / ".env")
+        candidates.append(here.parent / ".env")
+    except Exception:
+        pass
+
+    for p in candidates:
+        try:
+            if not p.exists() or not p.is_file():
+                continue
+            for line in p.read_text(encoding="utf-8").splitlines():
+                s = line.strip()
+                if not s or s.startswith("#"):
+                    continue
+                if s.lower().startswith("export "):
+                    s = s[7:].strip()
+                if "=" not in s:
+                    continue
+                k, v = s.split("=", 1)
+                k = k.strip()
+                v = v.strip().strip('"').strip("'")
+                if not k:
+                    continue
+                os.environ.setdefault(k, v)
+            break
+        except Exception:
+            continue
+
+
+load_dotenv()
 
 _CONFIG_DIR_ENV = os.environ.get("STTS_CONFIG_DIR")
 CONFIG_DIR = (Path(_CONFIG_DIR_ENV).expanduser() if _CONFIG_DIR_ENV else (Path.home() / ".config" / "stts-python"))
@@ -51,6 +88,27 @@ DEFAULT_CONFIG = {
     "speaker_device": None,
     "audio_auto_switch": True,
 }
+
+
+def apply_env_overrides(config: dict) -> dict:
+    if os.environ.get("STTS_TIMEOUT"):
+        try:
+            config["timeout"] = int(os.environ["STTS_TIMEOUT"])
+        except Exception:
+            pass
+    if os.environ.get("STTS_LANGUAGE"):
+        config["language"] = os.environ["STTS_LANGUAGE"].strip() or config.get("language")
+    if os.environ.get("STTS_TTS_VOICE"):
+        config["tts_voice"] = os.environ["STTS_TTS_VOICE"].strip() or config.get("tts_voice")
+    if os.environ.get("STTS_MIC_DEVICE"):
+        v = os.environ["STTS_MIC_DEVICE"].strip()
+        config["mic_device"] = None if v in ("0", "auto", "") else v
+    if os.environ.get("STTS_SPEAKER_DEVICE"):
+        v = os.environ["STTS_SPEAKER_DEVICE"].strip()
+        config["speaker_device"] = None if v in ("0", "auto", "") else v
+    if os.environ.get("STTS_AUDIO_AUTO_SWITCH"):
+        config["audio_auto_switch"] = os.environ["STTS_AUDIO_AUTO_SWITCH"].strip() not in ("0", "false", "no", "n")
+    return config
 
 class Colors:
     RED = '\033[0;31m'
@@ -154,10 +212,12 @@ def load_config() -> dict:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     if CONFIG_FILE.exists():
         try:
-            return json.loads(CONFIG_FILE.read_text())
+            cfg = DEFAULT_CONFIG.copy()
+            cfg.update(json.loads(CONFIG_FILE.read_text()))
+            return apply_env_overrides(cfg)
         except:
             pass
-    return DEFAULT_CONFIG.copy()
+    return apply_env_overrides(DEFAULT_CONFIG.copy())
 
 
 def save_config(config: dict) -> None:
@@ -670,6 +730,58 @@ def interactive_setup() -> dict:
     return config
 
 
+def nlp2cmd_translate(text: str) -> Optional[str]:
+    if os.environ.get("STTS_NLP2CMD_ENABLED", "0").strip() not in ("1", "true", "yes", "y"):
+        return None
+    bin_name = os.environ.get("STTS_NLP2CMD_BIN", "nlp2cmd")
+    args = shlex.split(os.environ.get("STTS_NLP2CMD_ARGS", "-r"))
+    if not shutil.which(bin_name):
+        cprint(Colors.YELLOW, f"⚠️  {bin_name} nie znaleziony. Zainstaluj: pip install nlp2cmd")
+        return None
+    try:
+        res = subprocess.run([bin_name, *args, text], capture_output=True, text=True, timeout=60)
+        out = (res.stdout or "") + (res.stderr or "")
+        lines = [l.strip() for l in out.splitlines() if l.strip()]
+        if not lines:
+            return None
+
+        # heuristic: first plausible command-like line
+        for l in lines:
+            if l.startswith("```"):
+                continue
+            if l.startswith("📊"):
+                continue
+            if l.lower().startswith("time:"):
+                continue
+            if l.startswith("$"):
+                return l.lstrip("$").strip()
+            # shell-ish / sql-ish
+            if any(x in l for x in (" ", ";", "|", "&&", "||", "SELECT", "select", "docker", "kubectl", "git")):
+                return l
+            if l and all(ch.isalnum() or ch in ("-", "_", ".") for ch in l):
+                return l
+        return lines[0]
+    except Exception:
+        return None
+
+
+def nlp2cmd_confirm(cmd: str) -> bool:
+    if os.environ.get("STTS_NLP2CMD_CONFIRM", "1").strip() in ("0", "false", "no", "n"):
+        return True
+    print(f"\nNLP2CMD → {cmd}")
+    ans = input("Uruchomić tę komendę? (y/n): ").strip().lower()
+    return ans == "y"
+
+
+def _has_pexpect() -> bool:
+    try:
+        import pexpect  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
 class VoiceShell:
     def __init__(self, config: dict):
         self.config = config
@@ -768,6 +880,73 @@ class VoiceShell:
         except Exception as e:
             return f"❌ Error: {e}", 1
 
+    def run_command_any(self, cmd: str):
+        # If pexpect exists, support interactive prompts with TTS + voice reply.
+        if sys.stdin.isatty() and _has_pexpect():
+            try:
+                return self.run_command_interactive(cmd)
+            except Exception:
+                pass
+        out, code = self.run_command(cmd)
+        return out, code, False
+
+    def run_command_interactive(self, cmd: str):
+        import pexpect
+
+        if os.name != "nt":
+            child = pexpect.spawn("/bin/bash", ["-lc", cmd], encoding="utf-8", timeout=1)
+        else:
+            child = pexpect.spawn(cmd, encoding="utf-8", timeout=1)
+        output_parts: List[str] = []
+        last_nonempty = ""
+        printed = False
+
+        def _flush(text: str):
+            nonlocal last_nonempty, printed
+            if text:
+                printed = True
+                print(text, end="", flush=True)
+                output_parts.append(text)
+                for line in text.splitlines():
+                    s = line.strip()
+                    if s:
+                        last_nonempty = s
+
+        while True:
+            try:
+                idx = child.expect(["\n", pexpect.EOF, pexpect.TIMEOUT])
+                if idx == 0:
+                    _flush(child.before + "\n")
+                elif idx == 1:
+                    _flush(child.before)
+                    break
+                else:
+                    # No output for a moment -> likely waiting for input
+                    pending = (child.before or "").strip()
+                    prompt_text = pending or last_nonempty
+                    if prompt_text:
+                        cprint(Colors.MAGENTA, f"📢 {prompt_text[:120]}")
+                        self.speak(prompt_text)
+
+                    ans = input("🎤 Odpowiedź głosem? (y/n, ENTER=klawiatura): ").strip().lower()
+                    if ans == "y":
+                        reply = self.listen()
+                        if not reply:
+                            reply = input("⌨️  Odpowiedź: ")
+                    else:
+                        reply = input("⌨️  Odpowiedź: ")
+                    child.sendline(reply)
+            except pexpect.exceptions.EOF:
+                break
+
+        try:
+            child.close()
+        except Exception:
+            pass
+
+        code = child.exitstatus if child.exitstatus is not None else (child.status or 0)
+        return "".join(output_parts), code, printed
+
     def run(self):
         PS1 = f"{Colors.GREEN}🔊 stts(py)>{Colors.NC} "
         cprint(Colors.BOLD + Colors.CYAN, "\nSTTS (python) - Voice Shell\n")
@@ -796,14 +975,26 @@ class VoiceShell:
                     self.config["speaker_device"] = choose_device_interactive("Wybierz głośnik (info)", list_playback_devices_linux())
                     save_config(self.config)
                     continue
+                if cmd.startswith("nlp "):
+                    nl = cmd[4:].strip()
+                    if not nl:
+                        continue
+                    translated = nlp2cmd_translate(nl)
+                    if translated and nlp2cmd_confirm(translated):
+                        cmd = translated
+                    else:
+                        continue
                 if not cmd:
                     cmd = self.listen()
                     if not cmd:
                         continue
+                    translated = nlp2cmd_translate(cmd)
+                    if translated and nlp2cmd_confirm(translated):
+                        cmd = translated
 
                 cprint(Colors.BLUE, f"▶️  {cmd}")
-                output, code = self.run_command(cmd)
-                if output.strip():
+                output, code, printed = self.run_command_any(cmd)
+                if output.strip() and not printed:
                     print(output)
 
                 lines = [l.strip() for l in output.splitlines() if l.strip()]
@@ -863,6 +1054,9 @@ def main():
             print(text)
             return 0 if text else 1
         if text:
+            translated = nlp2cmd_translate(text)
+            if translated and nlp2cmd_confirm(translated):
+                text = translated
             out, code = shell.run_command(text)
             if out.strip():
                 print(out)

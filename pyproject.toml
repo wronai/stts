@@ -15,7 +15,6 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "License :: OSI Approved :: Apache Software License",
 ]
-scripts = {stts = "stts"}
 
-[tool.setuptools.package-data]
-stts = ["VERSION"]
+[tool.setuptools]
+script-files = ["python/stts"]
