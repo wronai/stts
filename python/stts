@@ -88,6 +88,7 @@ CONFIG_FILE_JSON = CONFIG_DIR / "config.json"
 CONFIG_FILE_YAML = CONFIG_DIR / "config.yaml"
 CONFIG_FILE_YML = CONFIG_DIR / "config.yml"
 MODELS_DIR = CONFIG_DIR / "models"
+BIN_DIR = CONFIG_DIR / "bin"
 HISTORY_FILE = CONFIG_DIR / "history"
 
 DEFAULT_CONFIG = {
@@ -107,6 +108,10 @@ DEFAULT_CONFIG = {
     "vad_silence_ms": 800,
     "vad_threshold_db": -45.0,
     "safe_mode": False,
+    "piper_auto_install": True,
+    "piper_auto_download": True,
+    "piper_release_tag": "2023.11.14-2",
+    "piper_voice_version": "v1.0.0",
 }
 
 
@@ -161,6 +166,14 @@ def apply_env_overrides(config: dict) -> dict:
             pass
     if os.environ.get("STTS_SAFE_MODE"):
         config["safe_mode"] = os.environ["STTS_SAFE_MODE"].strip() not in ("0", "false", "no", "n")
+    if os.environ.get("STTS_PIPER_AUTO_INSTALL"):
+        config["piper_auto_install"] = os.environ["STTS_PIPER_AUTO_INSTALL"].strip() not in ("0", "false", "no", "n")
+    if os.environ.get("STTS_PIPER_AUTO_DOWNLOAD"):
+        config["piper_auto_download"] = os.environ["STTS_PIPER_AUTO_DOWNLOAD"].strip() not in ("0", "false", "no", "n")
+    if os.environ.get("STTS_PIPER_RELEASE_TAG"):
+        config["piper_release_tag"] = os.environ["STTS_PIPER_RELEASE_TAG"].strip() or config.get("piper_release_tag")
+    if os.environ.get("STTS_PIPER_VOICE_VERSION"):
+        config["piper_voice_version"] = os.environ["STTS_PIPER_VOICE_VERSION"].strip() or config.get("piper_voice_version")
     return config
 
 class Colors:
@@ -926,9 +939,126 @@ class EspeakTTS(TTSProvider):
 class PiperTTS(TTSProvider):
     name = "piper"
 
+    @staticmethod
+    def find_piper_bin() -> Optional[str]:
+        p = shutil.which("piper")
+        if p:
+            return p
+        for cand in (BIN_DIR / "piper", BIN_DIR / "piper" / "piper"):
+            try:
+                if cand.exists() and cand.is_file():
+                    return str(cand)
+            except Exception:
+                continue
+        return None
+
+    @staticmethod
+    def _piper_asset_name(info: SystemInfo) -> Optional[str]:
+        if info.os_name != "linux":
+            return None
+        arch = (info.arch or "").lower()
+        if arch in ("x86_64", "amd64"):
+            return "piper_linux_x86_64.tar.gz"
+        if arch in ("aarch64", "arm64"):
+            return "piper_linux_aarch64.tar.gz"
+        if arch in ("armv7l",):
+            return "piper_linux_armv7l.tar.gz"
+        return None
+
+    @staticmethod
+    def install_local(info: SystemInfo, release_tag: str) -> bool:
+        asset = PiperTTS._piper_asset_name(info)
+        if not asset:
+            cprint(Colors.YELLOW, f"⚠️  Nieobsługiwana platforma dla piper: os={info.os_name} arch={info.arch}")
+            return False
+        url = f"https://github.com/rhasspy/piper/releases/download/{release_tag}/{asset}"
+        BIN_DIR.mkdir(parents=True, exist_ok=True)
+
+        try:
+            with tempfile.NamedTemporaryFile(prefix="stts_piper_", suffix=".tar.gz", delete=False) as f:
+                tmp_path = f.name
+            cprint(Colors.YELLOW, f"📥 Downloading piper binary: {asset}")
+            urllib.request.urlretrieve(url, tmp_path, _download_progress)
+            print()
+
+            def _safe_members(tar: tarfile.TarFile):
+                for m in tar.getmembers():
+                    p = m.name
+                    if p.startswith("/") or ".." in p.split("/"):
+                        continue
+                    yield m
+
+            with tarfile.open(tmp_path, "r:gz") as tar:
+                tar.extractall(path=str(BIN_DIR), members=list(_safe_members(tar)))
+
+            piper_bin = PiperTTS.find_piper_bin()
+            if not piper_bin:
+                cprint(Colors.YELLOW, "⚠️  piper pobrany, ale nie znaleziono binarki")
+                return False
+            try:
+                os.chmod(piper_bin, 0o755)
+            except Exception:
+                pass
+            cprint(Colors.GREEN, f"✅ Piper installed: {piper_bin}")
+            return True
+        except Exception as e:
+            cprint(Colors.YELLOW, f"⚠️  Piper install failed: {e}")
+            return False
+        finally:
+            try:
+                if "tmp_path" in locals() and tmp_path and Path(tmp_path).exists():
+                    Path(tmp_path).unlink()
+            except Exception:
+                pass
+
+    @staticmethod
+    def _parse_voice_id(voice_id: str) -> Optional[Tuple[str, str, str, str]]:
+        v = (voice_id or "").strip()
+        if not v or "/" in v or v.endswith(".onnx"):
+            return None
+        parts = v.split("-")
+        if len(parts) < 3:
+            return None
+        locale = parts[0]
+        quality = parts[-1]
+        speaker = "-".join(parts[1:-1])
+        lang = locale.split("_")[0].lower() if "_" in locale else locale.lower()
+        return lang, locale, speaker, quality
+
+    @staticmethod
+    def download_voice(voice_id: str, voice_version: str) -> bool:
+        parsed = PiperTTS._parse_voice_id(voice_id)
+        if not parsed:
+            cprint(Colors.YELLOW, f"⚠️  Niepoprawny voice id dla piper: {voice_id}")
+            return False
+        lang, locale, speaker, quality = parsed
+        base = f"https://huggingface.co/rhasspy/piper-voices/resolve/{voice_version}"
+        model_url = f"{base}/{lang}/{locale}/{speaker}/{quality}/{voice_id}.onnx?download=true"
+        cfg_url = f"{base}/{lang}/{locale}/{speaker}/{quality}/{voice_id}.onnx.json?download=true"
+
+        out_dir = MODELS_DIR / "piper"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        model_path = out_dir / f"{voice_id}.onnx"
+        cfg_path = out_dir / f"{voice_id}.onnx.json"
+
+        try:
+            if not model_path.exists() or model_path.stat().st_size < 1024 * 1024:
+                cprint(Colors.YELLOW, f"📥 Downloading piper voice model: {voice_id}")
+                urllib.request.urlretrieve(model_url, str(model_path), _download_progress)
+                print()
+            if not cfg_path.exists() or cfg_path.stat().st_size < 100:
+                cprint(Colors.YELLOW, f"📥 Downloading piper voice config: {voice_id}")
+                urllib.request.urlretrieve(cfg_url, str(cfg_path), _download_progress)
+                print()
+            cprint(Colors.GREEN, f"✅ Piper voice ready: {model_path}")
+            return True
+        except Exception as e:
+            cprint(Colors.YELLOW, f"⚠️  Piper voice download failed: {e}")
+            return False
+
     @classmethod
     def is_available(cls, info: SystemInfo):
-        if shutil.which("piper"):
+        if PiperTTS.find_piper_bin():
             return True, "piper found"
         return False, "install piper (binary)"
 
@@ -968,7 +1098,7 @@ class PiperTTS(TTSProvider):
             return
 
     def speak(self, text: str) -> None:
-        piper = shutil.which("piper")
+        piper = PiperTTS.find_piper_bin()
         model = self._resolve_model()
         if not piper:
             cprint(Colors.YELLOW, "⚠️  Brak binarki piper w PATH")
@@ -1163,13 +1293,27 @@ def interactive_setup() -> dict:
     if input(f"Download model {model} now? (y/n): ").strip().lower() == "y":
         stt_cls.download_model(model)
 
-    tts_cls = EspeakTTS
-    available, reason = tts_cls.is_available(info)
-    print(f"TTS: {tts_cls.name} ({reason})")
-    if not available:
-        cprint(Colors.YELLOW, "Install espeak: sudo apt install espeak")
+    es_ok, es_reason = EspeakTTS.is_available(info)
+    pi_ok, pi_reason = PiperTTS.is_available(info)
+    print("TTS:")
+    print(f"  1) espeak ({'OK' if es_ok else es_reason})")
+    print(f"  2) piper  ({'OK' if pi_ok else pi_reason})")
+    tts_sel = input("Wybierz TTS [1/2] (ENTER=1): ").strip() or "1"
 
-    config["tts_provider"] = "espeak" if available else None
+    if tts_sel == "2":
+        config["tts_provider"] = "piper"
+        config["tts_voice"] = input("Piper voice id (ENTER=pl_PL-gosia-medium): ").strip() or "pl_PL-gosia-medium"
+        if not PiperTTS.find_piper_bin():
+            if input("Pobrać i zainstalować piper binarkę (local)? (y/n): ").strip().lower() == "y":
+                PiperTTS.install_local(info, config.get("piper_release_tag", "2023.11.14-2"))
+        inst = PiperTTS(voice=config.get("tts_voice", ""))
+        if not inst._resolve_model():
+            if input("Pobrać model piper dla tego głosu? (y/n): ").strip().lower() == "y":
+                PiperTTS.download_voice(config.get("tts_voice", ""), config.get("piper_voice_version", "v1.0.0"))
+    else:
+        config["tts_provider"] = "espeak" if es_ok else None
+        if not es_ok:
+            cprint(Colors.YELLOW, "Install espeak: sudo apt install espeak")
 
     if info.os_name == "linux":
         src, sink = get_active_pulse_devices()
@@ -1331,6 +1475,12 @@ class VoiceShell:
         provider = self.config.get("tts_provider")
         voice = self.config.get("tts_voice", "pl")
 
+        if provider == "piper" and self.config.get("piper_auto_install", True) and not PiperTTS.find_piper_bin():
+            try:
+                PiperTTS.install_local(self.info, self.config.get("piper_release_tag", "2023.11.14-2"))
+            except Exception:
+                pass
+
         if provider in TTS_PROVIDERS:
             cls = TTS_PROVIDERS[provider]
             available, reason = cls.is_available(self.info)
@@ -1339,7 +1489,10 @@ class VoiceShell:
                 if provider == "piper":
                     try:
                         if not getattr(inst, "_resolve_model")():
-                            available, reason = False, "piper model not found"
+                            if self.config.get("piper_auto_download", True):
+                                PiperTTS.download_voice(voice, self.config.get("piper_voice_version", "v1.0.0"))
+                            if not getattr(inst, "_resolve_model")():
+                                available, reason = False, "piper model not found"
                     except Exception:
                         available, reason = False, "piper model not found"
                 if available:
@@ -1514,6 +1667,10 @@ class VoiceShell:
                     print(f"  mic: {src}")
                 if sink:
                     print(f"  speaker: {sink}")
+        tts_state = "disabled"
+        if self.tts:
+            tts_state = f"{getattr(self.tts, 'name', 'tts')} voice={getattr(self.tts, 'voice', '')}"
+        print(f"TTS: {tts_state}")
         print("Komendy: ENTER=STT, 'exit'=wyjście, 'setup'=konfiguracja, 'audio'=urządzenia, 'meter'=poziomy")
         if self.config.get("startup_tts", True):
             self.speak("Powiedz co chcesz zrobić. Naciśnij enter i mów do mikrofonu.")
@@ -1603,6 +1760,10 @@ def parse_args(argv: List[str]):
     tts_provider = None
     tts_voice = None
     tts_stdin = False
+    tts_test = False
+    tts_test_text = None
+    install_piper = False
+    download_piper_voice = None
     help_ = False
     dry_run = False
     safe_mode = False
@@ -1626,6 +1787,13 @@ def parse_args(argv: List[str]):
             tts_voice = next(it, None)
         elif a == "--tts-stdin":
             tts_stdin = True
+        elif a == "--tts-test":
+            tts_test = True
+            tts_test_text = next(it, None)
+        elif a == "--install-piper":
+            install_piper = True
+        elif a == "--download-piper-voice":
+            download_piper_voice = next(it, None)
         elif a == "--dry-run":
             dry_run = True
         elif a == "--safe-mode":
@@ -1634,7 +1802,20 @@ def parse_args(argv: List[str]):
             help_ = True
         else:
             rest.append(a)
-    return stt_file, stt_only, stt_once, setup, init, tts_provider, tts_voice, tts_stdin, help_, dry_run, safe_mode, rest
+    return stt_file, stt_only, stt_once, setup, init, tts_provider, tts_voice, tts_stdin, tts_test, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, rest
+
+
+def tts_test(shell: "VoiceShell", text: str) -> int:
+    msg = (text or "Test syntezatora mowy")[:200]
+    if not shell.tts:
+        print(f"[stts] TTS disabled (tts_provider={shell.config.get('tts_provider')} tts_voice={shell.config.get('tts_voice')})", file=sys.stderr)
+        return 2
+    try:
+        shell.tts.speak(msg)
+        return 0
+    except Exception as e:
+        print(f"[stts] TTS error: {e}", file=sys.stderr)
+        return 3
 
 
 def _resolve_at_token(token: str, config: dict) -> Optional[str]:
@@ -1771,7 +1952,7 @@ def tts_from_stdin(shell: "VoiceShell") -> int:
 
 def main():
     config = load_config()
-    stt_file, stt_only, stt_once, setup, init, tts_provider, tts_voice, tts_stdin, help_, dry_run, safe_mode, rest = parse_args(sys.argv[1:])
+    stt_file, stt_only, stt_once, setup, init, tts_provider, tts_voice, tts_stdin, tts_test_flag, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, rest = parse_args(sys.argv[1:])
 
     # CLI --safe-mode overrides config
     if safe_mode:
@@ -1784,10 +1965,16 @@ def main():
         print("  --safe-mode    Zawsze pytaj przed wykonaniem")
         print("\nTryby pipeline:")
         print("  --tts-stdin    Czytaj stdin i przeczytaj na głos ostatnią niepustą linię")
+        print("  --tts-test [TEXT]  Zrób test TTS i zakończ")
+        print("\nAutomatyczne TTS (piper):")
+        print("  --install-piper        Pobierz piper binarkę do ~/.config/stts-python/bin")
+        print("  --download-piper-voice VOICE_ID  Pobierz model i config do ~/.config/stts-python/models/piper")
         print("\nZmienne środowiskowe:")
         print("  STTS_SAFE_MODE=1       Włącz tryb bezpieczny")
         print("  STTS_VAD_ENABLED=1     Włącz VAD auto-stop (domyślnie)")
         print("  STTS_VAD_SILENCE_MS=800  Czas ciszy do zatrzymania (ms)")
+        print("  STTS_PIPER_AUTO_INSTALL=1  Auto-install piper binarki (local)")
+        print("  STTS_PIPER_AUTO_DOWNLOAD=1 Auto-download modelu piper dla tts_voice")
         return 0
 
     if tts_provider is not None or tts_voice is not None:
@@ -1798,12 +1985,25 @@ def main():
         if not (init or setup or stt_once or stt_file or rest or tts_stdin):
             return 0
 
+    if install_piper:
+        PiperTTS.install_local(detect_system(), config.get("piper_release_tag", "2023.11.14-2"))
+        if not (init or setup or stt_once or stt_file or rest or tts_stdin or tts_test_flag or download_piper_voice):
+            return 0
+
+    if download_piper_voice:
+        PiperTTS.download_voice(download_piper_voice, config.get("piper_voice_version", "v1.0.0"))
+        if not (init or setup or stt_once or stt_file or rest or tts_stdin or tts_test_flag):
+            return 0
+
     if init:
         config = quick_init(init)
     elif setup or (config.get("stt_provider") is None and config.get("tts_provider") is None and not rest and not stt_file and not tts_stdin):
         config = interactive_setup()
 
     shell = VoiceShell(config)
+
+    if tts_test_flag:
+        return tts_test(shell, tts_test_text or "")
 
     if tts_stdin:
         return tts_from_stdin(shell)

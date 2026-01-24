@@ -27,8 +27,59 @@ Najważniejsze zmienne:
 - `STTS_CONFIG_DIR` - gdzie trzymać modele i config (przydatne dla Docker cache)
 - `STTS_TIMEOUT` - czas nagrywania STT (sekundy), domyślnie `5`
 - `STTS_NLP2CMD_ENABLED=1` - włącza NL → komenda przez `nlp2cmd`
-- `STTS_NLP2CMD_ARGS=-r` - tryb jak w przykładach ("Pokaż użytkowników")
+- `STTS_TTS_VOICE` - głos TTS (np. `pl` dla espeak, `pl_PL-gosia-medium` dla piper)
 - `STTS_NLP2CMD_CONFIRM=1` - zawsze pytaj o potwierdzenie
+
+## TTS: szybki setup + autodiagnostyka
+
+Jeśli "TTS nie działa" (cisza), najczęstsze przyczyny:
+
+- brak binarki providera (`espeak` / `piper`)
+- dla `piper`: brak modelu `*.onnx` **i** `*.onnx.json`
+- brak odtwarzacza audio (`paplay` / `aplay` / `play`) dla `piper`
+
+### Test TTS (bez STT)
+
+```bash
+./stts --tts-test "Test syntezatora mowy"
+```
+
+### Setup: espeak (Linux)
+
+```bash
+make tts-setup-espeak
+```
+
+### Setup: piper (Linux, auto-download)
+
+```bash
+make tts-setup-piper
+```
+
+### Piper: automatyczny install + auto-download w runtime
+
+Wersja Python potrafi automatycznie:
+
+- pobrać binarkę `piper` do `~/.config/stts-python/bin/`
+- pobrać model i config głosu do `~/.config/stts-python/models/piper/`
+
+Sterowanie przez `.env`:
+
+```bash
+STTS_PIPER_AUTO_INSTALL=1
+STTS_PIPER_AUTO_DOWNLOAD=1
+STTS_PIPER_RELEASE_TAG=2023.11.14-2
+STTS_PIPER_VOICE_VERSION=v1.0.0
+```
+
+Ręcznie (CLI):
+
+```bash
+./stts --install-piper
+./stts --download-piper-voice pl_PL-gosia-medium
+./stts --tts-provider piper --tts-voice pl_PL-gosia-medium
+./stts --tts-test "Cześć, to działa."
+```
 
 Uwaga: logi STT mają timestampy i czasy trwania (nagrywanie / rozpoznawanie), co ułatwia mierzenie opóźnień.
 
