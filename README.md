@@ -22,10 +22,28 @@ użycie STT i TTS w komendzie shell:
 ./stts git commit -m "{STT}"
 # razem z TTS 
 ./stts git commit -m "{STT}" | ./stts --tts-stdin
-# z konfiguracją TTS
+# z TTS espeak angielski
+./stts git commit -m "{STT}" | ./stts --tts-stdin --tts-provider espeak --tts-voice en
+# z konfiguracją TTS lepszej jakosci
+./stts git commit -m "{STT}" | ./stts --tts-provider piper --tts-voice en_US-amy-medium --tts-stdin
+# z konfiguracją TTS polski lepszej jakosci
 ./stts git commit -m "{STT}" | ./stts --tts-provider piper --tts-voice pl_PL-gosia-medium --tts-stdin
 ```
 
+**Uwaga:** `./stts` wykonuje komendę z buforowaniem – output pojawi się naraz po zakończeniu. Jeśli potrzebujesz strumieniowanie (np. `git`), użyj `--dry-run | bash` lub `git commit -m "$(./stts --stt-once)"`.
+
+```bash
+./stts git commit -m "{STT}" | ./stts --tts-stdin
+[12:23:19] 🎤 Mów (max 5s, VAD)... ✅ VAD stop (4.4s / 4.6s)
+🔎 audio: 4.4s, rms=-44.5dBFS
+[12:23:24] 🔄 Rozpoznawanie... ✅ "Aktualizuj dokumentację." (5.7s)
+On branch main
+Your branch is up to date with 'origin/main'.
+
+nothing to commit, working tree clean
+
+[stts] TTS: provider=piper voice=pl_PL-gosia-medium
+```
 ## Konfiguracja
 
 ```bash
@@ -61,6 +79,10 @@ Najważniejsze zmienne:
 - `STTS_NLP2CMD_ENABLED=1` - włącza NL → komenda przez `nlp2cmd`
 - `STTS_NLP2CMD_ARGS=-r` - tryb jak w przykładach: `nlp2cmd -r "Pokaż użytkowników"`
 - `STTS_NLP2CMD_CONFIRM=1` - pytaj o potwierdzenie przed wykonaniem
+- `STTS_PIPER_AUTO_INSTALL=1` - auto-instalacja piper binarki (Python)
+- `STTS_PIPER_AUTO_DOWNLOAD=1` - auto-download modelu głosu piper (Python)
+- `STTS_PIPER_RELEASE_TAG=2023.11.14-2` - wersja piper do pobrania
+- `STTS_PIPER_VOICE_VERSION=v1.0.0` - wersja głosów piper do pobrania
 
 ## NLP2CMD (Natural Language → komendy)
 
@@ -73,6 +95,48 @@ Instalacja `nlp2cmd`:
 
 ```bash
 cd python && make pip-nlp2cmd
+```
+
+## TTS: szybki setup + autodiagnostyka (Python)
+
+Jeśli "TTS nie działa" (cisza), najczęstsze przyczyny:
+
+- brak binarki providera (`espeak` / `piper`)
+- dla `piper`: brak modelu `*.onnx` **i** `*.onnx.json`
+- brak odtwarzacza audio (`paplay` / `aplay` / `play`) dla `piper`
+
+### Test TTS (bez STT)
+
+```bash
+./stts --tts-test "Test syntezatora mowy"
+```
+
+### Setup: espeak (Linux)
+
+```bash
+make tts-setup-espeak
+```
+
+### Setup: piper (Linux, auto-download)
+
+```bash
+make tts-setup-piper
+```
+
+### Piper: automatyczny install + auto-download w runtime
+
+Wersja Python potrafi automatycznie:
+
+- pobrać binarkę `piper` do `~/.config/stts-python/bin/`
+- pobrać model i config głosu do `~/.config/stts-python/models/piper/`
+
+Ręcznie (CLI):
+
+```bash
+./stts --install-piper
+./stts --download-piper-voice pl_PL-gosia-medium
+./stts --tts-provider piper --tts-voice pl_PL-gosia-medium
+./stts --tts-test "Cześć, to działa."
 ```
 
 ## Testy w Docker (bez dostępu do audio)
@@ -226,6 +290,16 @@ Tryb `--stt-once` wypisuje sam transkrypt na stdout (a logi na stderr), więc na
 ./stts --stt-once | xargs -I{} nlp2cmd -r "{}"
 ```
 
+**Strumieniowanie komend z git:** Jeśli chcesz zobaczyć output `git` na bieżąco (bez bufora), użyj:
+
+```bash
+# Opcja 1: --dry-run + bash
+./stts --dry-run git commit -m "{STT}" | bash
+
+# Opcja 2: podstawienie argumentu (brak bufora)
+git commit -m "$(./stts --stt-once)"
+```
+
 ### Pipeline (TTS na końcu, Python)
 
 Jeśli chcesz, żeby dowolny pipeline kończył się TTS (np. przeczytanie ostatniej niepustej linii), użyj:
@@ -342,6 +416,17 @@ ls ~/.config/stts-python/models/piper/*.onnx
 command -v paplay || command -v aplay || command -v play
 ```
 
+**Automatyzacja (Python):**
+
+```bash
+# Auto-install piper + auto-download głosu
+./stts --install-piper
+./stts --download-piper-voice pl_PL-gosia-medium
+
+# Lub przez Makefile
+make tts-setup-piper
+```
+
 ### TTS: espeak (fallback)
 
 ```bash
@@ -376,11 +461,11 @@ sudo apt install alsa-utils
 ### Brak dźwięku TTS
 
 ```bash
-# Test espeak
-espeak "test"
+# Diagnostyka (Python)
+./stts --tts-test "Test TTS"
 
-# Zainstaluj
-sudo apt install espeak
+# Jeśli brak espeak/piper/player:
+make tts-setup-espeak   # lub make tts-setup-piper
 ```
 
 ### Model nie pobiera się
@@ -416,6 +501,13 @@ stts/
 ├── stts-python/   # config + models dla Python
 └── stts-nodejs/   # config + models dla Node.js
 ```
+
+## 📚 Dokumentacja
+
+- **Python**: `python/README.md` – szczegóły TTS, piper, VAD, audio, CLI
+- **Node.js**: `nodejs/README.md` – szczegóły ESM, Docker, CLI
+- **.env**: `.env.example` (root) + `python/.env.example` + `nodejs/.env.example`
+- **Makefile**: `python/Makefile` – targety `tts-setup-espeak`, `tts-setup-piper`
 
 ## 📜 Licencja
 
