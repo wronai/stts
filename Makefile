@@ -145,13 +145,13 @@ version:
 	@echo $(VERSION)
 
 bump-patch:
-	@python3 bump_version.py patch
+	@$(PYTHON) bump_version.py patch
 
 bump-minor:
-	@python3 bump_version.py minor
+	@$(PYTHON) bump_version.py minor
 
 bump-major:
-	@python3 bump_version.py major
+	@$(PYTHON) bump_version.py major
 
 publish-npm:
 	@npm publish
@@ -162,7 +162,7 @@ ensure-pypi-tools:
 		$(PIP) install -U build twine \
 	)
 
-publish-pypi: ensure-pypi-tools
+publish-pypi: bump-patch ensure-pypi-tools
 	@rm -rf dist
 	@$(PYTHON) -m build
 	@$(PYTHON) -m twine upload dist/*
