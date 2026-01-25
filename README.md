@@ -1,5 +1,25 @@
 # 🎙️ stts - Universal Voice Shell
 
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
+[![Node.js Version](https://img.shields.io/badge/node.js-18+-green.svg)](https://nodejs.org)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)](https://github.com/wronai/stts)
+[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://github.com/wronai/stts)
+
+## 📋 Menu
+
+- [🚀 Szybki start](#szybki-start)
+- [⚙️ Konfiguracja](#konfiguracja)
+- [✨ Funkcje](#-funkcje)
+- [📊 Wymagania sprzętowe](#-wymagania-sprzętowe)
+- [💻 Użycie](#-użycie)
+- [🔧 Providery](#-providery)
+- [🍓 Raspberry Pi](#-raspberry-pi)
+- [🐛 Troubleshooting](#-troubleshooting)
+- [📁 Struktura](#-struktura)
+- [📚 Dokumentacja](#-dokumentacja)
+- [🔗 Powiązane projekty](#-powiązane-projekty)
+
 Repo zostało podzielone na **dwa niezależne projekty**:
 
 - **`python/`** - wersja Python
@@ -552,6 +572,23 @@ stts/
 - **Node.js**: `nodejs/README.md` – szczegóły ESM, Docker, CLI
 - **.env**: `.env.example` (root) + `python/.env.example` + `nodejs/.env.example`
 - **Makefile**: `python/Makefile` – targety `tts-setup-espeak`, `tts-setup-piper`
+
+## 🔗 Powiązane projekty
+
+### STT/TTS Engines
+- **[whisper.cpp](https://github.com/ggerganov/whisper.cpp)** - High-performance inference of OpenAI's Whisper model
+- **[faster-whisper](https://github.com/guillaumekint/faster-whisper)** - Faster Whisper transcription with CTranslate2
+- **[vosk](https://github.com/alphacep/vosk-api)** - Offline speech recognition API
+- **[piper](https://github.com/rhasspy/piper)** - Fast, local neural text-to-speech system
+- **[espeak](https://espeak.sourceforge.io/)** - Compact open source speech synthesizer
+
+### CLI Tools
+- **[nlp2cmd](https://github.com/wronai/nlp2cmd)** - Natural Language to Command converter
+- **[whisper-cli](https://github.com/ahmedkheir/whisper-cli)** - Command-line interface for Whisper
+
+### Audio Libraries
+- **[pyaudio](https://github.com/pyaudio/pyaudio)** - Python bindings for PortAudio
+- **[sox](https://sox.sourceforge.io/)** - Sound eXchange - universal sound processing utility
 
 ## 📜 Licencja
 
