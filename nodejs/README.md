@@ -103,8 +103,13 @@ Gdy ustawisz `STTS_NLP2CMD_PARALLEL=1`, `stts.mjs` odpala w tle proces Pythona z
 Jeśli chcesz używać dokładnie składni jak w wersji Python (placeholder), możesz uruchomić:
 
 ```bash
-STTS_NLP2CMD_ENABLED=1 STTS_NLP2CMD_PARALLEL=1 ./stts.mjs nlp2cmd -r "{STT}" --auto-confirm
+STTS_NLP2CMD_ENABLED=1 STTS_NLP2CMD_PARALLEL=1 ./stts.mjs nlp2cmd -r --query "{STT}" --auto-confirm
 ```
+
+Uwaga:
+
+- Tryb `--stt-stream-shell` oraz placeholder `{STT_STREAM}` są na ten moment dostępne tylko w wersji Python (`./stts`).
+- `STTS_TTS_NO_PLAY=1` (wyłączenie odtwarzania audio) jest na ten moment Python-only.
 
 ## Testowanie bez mikrofonu (symulacja w Docker/CI)
 

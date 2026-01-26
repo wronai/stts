@@ -15,6 +15,33 @@ bash examples/e2e_pipeline.sh  # Full STT+TTS+execution
 bash examples/e2e_streaming.sh # Streaming modes
 ```
 
+## Placeholder shell (voice-driven REPL)
+
+Python-only:
+
+```bash
+./python/stts --stt-stream-shell --cmd 'nlp2cmd -r --query "{STT}" --auto-confirm'
+```
+
+CI/Docker one-shot (bez mikrofonu):
+
+```bash
+STTS_MOCK_STT=1 ./python/stts --stt-file python/samples/cmd_ls.wav \
+  --stt-stream-shell --cmd 'echo "{STT_STREAM}"' --dry-run
+```
+
+## Pipeline: STT → nlp2cmd (stdin)
+
+```bash
+./python/stts --stt-once | ./python/stts nlp2cmd -r stdin --auto-confirm
+```
+
+Tip (CI): wyłącz odtwarzanie audio:
+
+```bash
+export STTS_TTS_NO_PLAY=1
+```
+
 ## Test Suites
 
 | Script | Description | Requirements |
