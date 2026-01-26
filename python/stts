@@ -2510,10 +2510,19 @@ def nlp2cmd_translate(text: str, config: Optional[dict] = None, force: bool = Fa
     bin_name = os.environ.get("STTS_NLP2CMD_BIN", "nlp2cmd")
     args = shlex.split(os.environ.get("STTS_NLP2CMD_ARGS", "-r"))
     try:
-        cmd = [bin_name, *args, text]
+        has_query = ("--query" in args) or ("-q" in args)
+        cmd = [bin_name, *args]
+        if not has_query:
+            cmd += ["--query", text]
+        else:
+            cmd += [text]
         if not shutil.which(bin_name):
             if bin_name == "nlp2cmd":
-                cmd = [_resolve_nlp2cmd_python(), "-m", "nlp2cmd.cli.main", *args, text]
+                cmd = [_resolve_nlp2cmd_python(), "-m", "nlp2cmd.cli.main", *args]
+                if not has_query:
+                    cmd += ["--query", text]
+                else:
+                    cmd += [text]
             else:
                 cprint(Colors.YELLOW, f"⚠️  {bin_name} nie znaleziony. Zainstaluj: pip install nlp2cmd")
                 return None
@@ -2531,12 +2540,6 @@ def nlp2cmd_translate(text: str, config: Optional[dict] = None, force: bool = Fa
                 return None
 
         for l in lines:
-            if l.startswith("```"):
-                continue
-            if l.startswith("📊"):
-                continue
-            if l.lower().startswith("time:"):
-                continue
             if l.startswith("$"):
                 candidate = l.lstrip("$").strip()
                 if is_sql_command(candidate):
@@ -2544,15 +2547,28 @@ def nlp2cmd_translate(text: str, config: Optional[dict] = None, force: bool = Fa
                     cprint(Colors.CYAN, "💡 Użyj: ./stts sqlite3 db.sqlite \"{STT}\" lub ./stts psql -c \"{STT}\"")
                     return None
                 return candidate
+
+        for l in lines:
+            if l.startswith("```"):
+                continue
+            if l.startswith("📊"):
+                continue
+            if l.lower().startswith("time:"):
+                continue
+            if l.startswith("#"):
+                continue
+            if l.startswith("Usage:") or l.startswith("Try '") or l.startswith("Error:"):
+                continue
+            if l.startswith("Generating") or l.startswith("Detected") or l.startswith("✓"):
+                continue
             if is_sql_command(l):
                 cprint(Colors.YELLOW, f"⚠️  Wykryto SQL (nie shell): {l[:60]}...")
                 cprint(Colors.CYAN, "💡 Użyj: ./stts sqlite3 db.sqlite \"{STT}\" lub ./stts psql -c \"{STT}\"")
                 return None
-            if any(x in l for x in (" ", ";", "|", "&&", "||", "docker", "kubectl", "git")):
+            if re.match(r"^[a-zA-Z0-9_./-]+(\s+.+)?$", l):
                 return l
-            if l and all(ch.isalnum() or ch in ("-", "_", ".") for ch in l):
-                return l
-        return lines[0]
+
+        return None
     except Exception:
         return None
 
@@ -2577,7 +2593,10 @@ pipeline = None
 err = None
 try:
     from nlp2cmd.generation.pipeline import RuleBasedPipeline
-    pipeline = RuleBasedPipeline(use_enhanced_context=False)
+    try:
+        pipeline = RuleBasedPipeline(use_enhanced_context=False)
+    except TypeError:
+        pipeline = RuleBasedPipeline()
 except Exception as e:
     err = str(e)
 
