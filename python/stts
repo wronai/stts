@@ -1798,7 +1798,12 @@ class WhisperCppSTT(STTProvider):
 
         try:
             short_audio = self._is_short_audio(audio_path)
-            cmd = [whisper_bin, "-m", str(model_path), "-l", self.language, "-f", audio_path, "-nt"]
+
+            lang = str(self.language or "").strip()
+            if lang.lower() in ("", "auto"):
+                cmd = [whisper_bin, "-m", str(model_path), "-f", audio_path, "-nt"]
+            else:
+                cmd = [whisper_bin, "-m", str(model_path), "-l", lang, "-f", audio_path, "-nt"]
 
             threads = (
                 (self.config.get("stt_threads") if isinstance(self.config, dict) else None)

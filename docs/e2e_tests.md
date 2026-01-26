@@ -9,8 +9,6 @@ The project uses WAV fixtures + sidecar transcripts:
 
 When you set `STTS_MOCK_STT=1`, STTS reads `*.wav.txt` instead of running a real STT model.
 
-Tip (CI/Docker): jeśli nie chcesz odtwarzania audio (TTS), ustaw `STTS_TTS_NO_PLAY=1`.
-
 Run via make:
 
 ```bash
@@ -49,27 +47,12 @@ STTS_MOCK_STT=1 ./stts --stt-file python/samples/cmd_echo_hello.wav \
   --stt-stream-shell --cmd "echo '{STT_STREAM}'" --dry-run
 ```
 
-## Offline placeholder one-shot (Python, bez pętli)
-
-Jeśli podasz `--stt-file` oraz komendę zawierającą `{STT}` / `{STT_STREAM}`, `stts` uruchomi STT z pliku i podstawia placeholdery.
-
-```bash
-STTS_MOCK_STT=1 ./stts --stt-file python/samples/cmd_ls.wav --dry-run echo '{STT}'
-```
-
-## Offline pipeline: STT → nlp2cmd (stdin)
-
-```bash
-STTS_MOCK_STT=1 ./stts --stt-file python/samples/cmd_ls.wav --stt-only | \
-  ./stts nlp2cmd -r stdin --auto-confirm --dry-run
-```
-
 ## Optional online (Deepgram)
 
 This runs only when `STTS_DEEPGRAM_KEY` is set.
 
 ```bash
-STTS_DEEPGRAM_KEY=sk-... ./stts --stt-provider deepgram --stt-file python/samples/cmd_ls.wav --stt-only
+STTS_DEEPGRAM_KEY=sk-... STTS_STT_PROVIDER=deepgram ./stts --stt-file python/samples/cmd_ls.wav --stt-only
 ```
 
 ## Benchmark (optional)
