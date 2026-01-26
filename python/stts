@@ -2171,6 +2171,18 @@ class PiperTTS(TTSProvider):
         v = (self.voice or "").strip()
         if not v:
             return None
+
+        # Map short language codes to full piper voice names
+        VOICE_ALIASES = {
+            "pl": "pl_PL-gosia-medium",
+            "en": "en_US-amy-medium",
+            "de": "de_DE-thorsten-medium",
+            "fr": "fr_FR-upmc-medium",
+            "es": "es_ES-carlfm-medium",
+        }
+        if v in VOICE_ALIASES:
+            v = VOICE_ALIASES[v]
+
         p = Path(v).expanduser()
         if p.exists() and p.is_file():
             cfg = Path(str(p) + ".json")
