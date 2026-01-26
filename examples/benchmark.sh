@@ -88,7 +88,7 @@ echo ""
 # ============================================================================
 
 STT_PROVIDERS=("whisper_cpp" "vosk")
-STT_MODELS=("" "small-pl")  # whisper uses default, vosk uses small-pl
+STT_MODELS=("${STTS_BENCH_WHISPER_MODEL:-tiny}" "${STTS_BENCH_VOSK_MODEL:-small-pl}")
 
 # Sample files with expected transcriptions
 declare -A SAMPLES_EXPECTED
@@ -111,10 +111,23 @@ _expected_for() {
   echo ""
 }
 
-mapfile -t SAMPLE_FILES < <(find "$SAMPLES" -maxdepth 1 -type f -name '*.wav' | sort)
+SAMPLE_FILES=()
+if [ "$#" -gt 0 ]; then
+  for p in "$@"; do
+    if [ -f "$p" ]; then
+      SAMPLE_FILES+=("$p")
+    fi
+  done
+else
+  mapfile -t SAMPLE_FILES < <(find "$SAMPLES" -maxdepth 1 -type f -name '*.wav' | sort)
+fi
 
 if [ ${#SAMPLE_FILES[@]} -eq 0 ]; then
-  echo "No samples found in: $SAMPLES" >&2
+  if [ "$#" -gt 0 ]; then
+    echo "No sample files found in args" >&2
+  else
+    echo "No samples found in: $SAMPLES" >&2
+  fi
   exit 2
 fi
 

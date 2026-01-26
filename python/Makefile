@@ -1,5 +1,5 @@
-.PHONY: setup voice test-tts gen-samples docker-build docker-test help \
-	stt-vosk-pl stt-silero stt-whisper-stream \
+.PHONY: setup voice test-tts gen-samples fix-samples docker-build docker-test help \
+	stt-vosk-pl stt-vosk-pl-full stt-silero stt-whisper-stream \
 	tts-piper-pl tts-mimic3 tts-festival \
 	setup-local-full test-local
 
@@ -38,6 +38,19 @@ tts-setup-piper:
 gen-samples:
 	@./scripts/generate_samples.sh
 
+fix-samples:
+	@command -v sox >/dev/null 2>&1 || (echo "❌ sox not found. Install: sudo apt install -y sox" && exit 1)
+	@echo "🔧 Normalizing sample WAVs (mono/16kHz/16-bit + normalize volume)..."
+	@for f in samples/cmd_*.wav; do \
+		[ -f "$$f" ] || continue; \
+		sox "$$f" -r 16000 -c 1 -b 16 "$$f.fixed.wav" vol 2.0 norm -1 >/dev/null 2>&1 || true; \
+		if [ -f "$$f.fixed.wav" ]; then mv "$$f.fixed.wav" "$$f"; fi; \
+	done
+	@printf "%s" "echo hello" > samples/cmd_echo_hello.wav.txt
+	@printf "%s" "ls" > samples/cmd_ls.wav.txt
+	@printf "%s" "make build" > samples/cmd_make_build.wav.txt
+	@echo "✅ Samples fixed"
+
 docker-build:
 	@docker build -t stts-python:latest .
 
@@ -67,6 +80,7 @@ help:
 	@echo "  make setup            - setup wizard"
 	@echo "  make voice            - interactive voice shell"
 	@echo "  make gen-samples      - generate WAV samples"
+	@echo "  make fix-samples      - normalize cmd_*.wav (format + volume)"
 	@echo "  make docker-test      - run tests in docker (no mic)"
 	@echo ""
 	@echo "Local STT (offline):"
@@ -113,6 +127,18 @@ stt-vosk-pl:
 	@cd $(CACHE_DIR)/models/vosk && unzip -o /tmp/vosk-small-pl.zip
 	@rm -f /tmp/vosk-small-pl.zip
 	@echo "✅ Vosk PL ready: $(CACHE_DIR)/models/vosk/vosk-model-small-pl-0.22"
+
+stt-vosk-pl-full:
+	@echo "📦 Installing Vosk + full Polish model..."
+	@$(PIP) -U vosk
+	@mkdir -p $(CACHE_DIR)/models/vosk
+	@echo "📥 Downloading vosk-model-pl-0.22..."
+	@rm -f /tmp/vosk-pl.zip
+	@curl -L -o /tmp/vosk-pl.zip \
+		"https://alphacephei.com/vosk/models/vosk-model-pl-0.22.zip"
+	@cd $(CACHE_DIR)/models/vosk && unzip -o /tmp/vosk-pl.zip
+	@rm -f /tmp/vosk-pl.zip
+	@echo "✅ Vosk PL ready: $(CACHE_DIR)/models/vosk/vosk-model-pl-0.22"
 
 # Silero STT: fast CPU inference, good PL/EN
 stt-silero:

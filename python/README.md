@@ -265,6 +265,18 @@ Możesz uruchomić dowolną komendę i wstawić transkrypt z mikrofonu jako `{ST
 STTS_NLP2CMD_ENABLED=1 STTS_NLP2CMD_PARALLEL=1 ./stts nlp2cmd -r --query "{STT}" --auto-confirm
 ```
 
+Jeśli zobaczysz błąd typu `Error: No such command '...` (nlp2cmd potraktował pierwsze słowo jako subkomendę), użyj `--dry-run` żeby sprawdzić quoting:
+
+```bash
+STTS_NLP2CMD_ENABLED=1 ./stts --dry-run nlp2cmd -r --query "{STT}" --auto-confirm
+```
+
+Alternatywa (zawsze odporna na quoting): STT → stdout → `nlp2cmd stdin`:
+
+```bash
+./stts --stt-once | nlp2cmd -r stdin --auto-confirm
+```
+
 `{STT_STREAM}` jest aliasem `{STT}` (MVP).
 
 ### Voice-driven REPL (placeholder shell)

@@ -1724,7 +1724,7 @@ class WhisperCppSTT(STTProvider):
 
     @staticmethod
     @functools.lru_cache(maxsize=32)
-    def _detect_prompt_flag(whisper_bin: str) -> Optional[str]:
+    def _help_text(whisper_bin: str) -> str:
         for args in (("--help",), ("-h",), ("-help",)):
             try:
                 res = subprocess.run(
@@ -1734,12 +1734,40 @@ class WhisperCppSTT(STTProvider):
                     timeout=2,
                 )
                 out = (res.stdout or "") + (res.stderr or "")
-                if "--prompt" in out:
-                    return "--prompt"
-                if re.search(r"(?mi)^\s*-p\b.*prompt", out):
-                    return "-p"
+                if out.strip():
+                    return out
             except Exception:
                 continue
+        return ""
+
+    @staticmethod
+    def _is_short_audio(audio_path: str, max_seconds: float = 8.0) -> bool:
+        try:
+            import wave
+
+            with wave.open(audio_path, "rb") as wf:
+                frames = int(wf.getnframes() or 0)
+                rate = int(wf.getframerate() or 0)
+                if rate <= 0:
+                    return False
+                dur = float(frames) / float(rate)
+                return dur <= float(max_seconds)
+        except Exception:
+            return False
+
+    @staticmethod
+    @functools.lru_cache(maxsize=128)
+    def _supports_help_token(whisper_bin: str, token: str) -> bool:
+        return token in WhisperCppSTT._help_text(whisper_bin)
+
+    @staticmethod
+    @functools.lru_cache(maxsize=32)
+    def _detect_prompt_flag(whisper_bin: str) -> Optional[str]:
+        out = WhisperCppSTT._help_text(whisper_bin)
+        if "--prompt" in out:
+            return "--prompt"
+        if re.search(r"(?mi)^\s*-p\b.*prompt", out):
+            return "-p"
         return None
 
     def transcribe(self, audio_path: str) -> str:
@@ -1769,8 +1797,20 @@ class WhisperCppSTT(STTProvider):
             return ""
 
         try:
+            short_audio = self._is_short_audio(audio_path)
             cmd = [whisper_bin, "-m", str(model_path), "-l", self.language, "-f", audio_path, "-nt"]
-            cmd.extend(["-t", str(min(os.cpu_count() or 4, 8))])
+
+            threads = (
+                (self.config.get("stt_threads") if isinstance(self.config, dict) else None)
+                or os.environ.get("STTS_STT_THREADS", "")
+            )
+            try:
+                threads_i = int(str(threads).strip()) if str(threads).strip() else 0
+            except Exception:
+                threads_i = 0
+            if threads_i <= 0:
+                threads_i = 4 if short_audio else min(os.cpu_count() or 4, 8)
+            cmd.extend(["-t", str(threads_i)])
 
             max_len = (
                 (self.config.get("stt_whisper_max_len") if isinstance(self.config, dict) else None)
@@ -1780,8 +1820,13 @@ class WhisperCppSTT(STTProvider):
                 max_len_i = int(str(max_len).strip()) if str(max_len).strip() else 0
             except Exception:
                 max_len_i = 0
+            if max_len_i <= 0 and short_audio:
+                max_len_i = 72
             if max_len_i > 0:
-                cmd.extend(["-ml", str(max_len_i)])
+                if self._supports_help_token(str(whisper_bin), "-ml"):
+                    cmd.extend(["-ml", str(max_len_i)])
+                elif self._supports_help_token(str(whisper_bin), "--max-len"):
+                    cmd.extend(["--max-len", str(max_len_i)])
 
             word_thold = (
                 (self.config.get("stt_whisper_word_thold") if isinstance(self.config, dict) else None)
@@ -1791,8 +1836,13 @@ class WhisperCppSTT(STTProvider):
                 wt = float(str(word_thold).strip()) if str(word_thold).strip() else None
             except Exception:
                 wt = None
+            if wt is None and short_audio:
+                wt = 0.01
             if wt is not None:
-                cmd.extend(["-wt", str(wt)])
+                if self._supports_help_token(str(whisper_bin), "-wt"):
+                    cmd.extend(["-wt", str(wt)])
+                elif self._supports_help_token(str(whisper_bin), "--word-thold"):
+                    cmd.extend(["--word-thold", str(wt)])
 
             no_speech_thold = (
                 (self.config.get("stt_whisper_no_speech_thold") if isinstance(self.config, dict) else None)
@@ -1802,8 +1852,13 @@ class WhisperCppSTT(STTProvider):
                 nth = float(str(no_speech_thold).strip()) if str(no_speech_thold).strip() else None
             except Exception:
                 nth = None
+            if nth is None and short_audio:
+                nth = 0.8
             if nth is not None:
-                cmd.extend(["-nth", str(nth)])
+                if self._supports_help_token(str(whisper_bin), "-nth"):
+                    cmd.extend(["-nth", str(nth)])
+                elif self._supports_help_token(str(whisper_bin), "--no-speech-thold"):
+                    cmd.extend(["--no-speech-thold", str(nth)])
 
             entropy_thold = (
                 (self.config.get("stt_whisper_entropy_thold") if isinstance(self.config, dict) else None)
@@ -1814,7 +1869,42 @@ class WhisperCppSTT(STTProvider):
             except Exception:
                 et = None
             if et is not None:
-                cmd.extend(["-et", str(et)])
+                if self._supports_help_token(str(whisper_bin), "-et"):
+                    cmd.extend(["-et", str(et)])
+                elif self._supports_help_token(str(whisper_bin), "--entropy-thold"):
+                    cmd.extend(["--entropy-thold", str(et)])
+
+            best_of = (
+                (self.config.get("stt_whisper_best_of") if isinstance(self.config, dict) else None)
+                or os.environ.get("STTS_WHISPER_BEST_OF", "")
+            )
+            try:
+                bo = int(str(best_of).strip()) if str(best_of).strip() else None
+            except Exception:
+                bo = None
+            if bo is None and short_audio:
+                bo = 1
+            if bo is not None:
+                if self._supports_help_token(str(whisper_bin), "-bo"):
+                    cmd.extend(["-bo", str(bo)])
+                elif self._supports_help_token(str(whisper_bin), "--best-of"):
+                    cmd.extend(["--best-of", str(bo)])
+
+            temperature = (
+                (self.config.get("stt_whisper_temperature") if isinstance(self.config, dict) else None)
+                or os.environ.get("STTS_WHISPER_TEMPERATURE", "")
+            )
+            try:
+                tp = float(str(temperature).strip()) if str(temperature).strip() else None
+            except Exception:
+                tp = None
+            if tp is None and short_audio:
+                tp = 0.0
+            if tp is not None:
+                if self._supports_help_token(str(whisper_bin), "-tp"):
+                    cmd.extend(["-tp", str(tp)])
+                elif self._supports_help_token(str(whisper_bin), "--temperature"):
+                    cmd.extend(["--temperature", str(tp)])
 
             prompt = (self.config.get("stt_prompt") if isinstance(self.config, dict) else None) or os.environ.get("STTS_STT_PROMPT", "")
             prompt = str(prompt or "").strip()
@@ -1976,6 +2066,7 @@ class VoskSTT(STTProvider):
         model_name = self.model or "small-pl"
         mappings = {
             "small-pl": "vosk-model-small-pl-0.22",
+            "pl-0.22": "vosk-model-pl-0.22",
             "small-en": "vosk-model-small-en-us-0.15",
         }
         dir_name = mappings.get(model_name, model_name)
@@ -2019,7 +2110,50 @@ class VoskSTT(STTProvider):
                 cprint(Colors.YELLOW, "⚠️ Audio must be mono 16-bit WAV")
                 return ""
 
-            rec = vosk.KaldiRecognizer(model, wf.getframerate())
+            grammar_src = (
+                (self.config.get("stt_vosk_grammar") if isinstance(self.config, dict) else None)
+                or os.environ.get("STTS_VOSK_GRAMMAR_JSON", "")
+            )
+            grammar_src = str(grammar_src or "").strip()
+            if grammar_src and Path(grammar_src).exists():
+                try:
+                    grammar_src = Path(grammar_src).read_text(encoding="utf-8")
+                except Exception:
+                    grammar_src = ""
+            grammar_json = ""
+            if grammar_src:
+                try:
+                    j = json.loads(grammar_src)
+                    if isinstance(j, list):
+                        grammar_json = json.dumps(j)
+                    elif isinstance(j, dict):
+                        phrases: List[str] = []
+                        for v in j.values():
+                            if not isinstance(v, list):
+                                continue
+                            for alt in v:
+                                if isinstance(alt, list):
+                                    phrase = " ".join(str(x).strip() for x in alt if str(x).strip())
+                                    if phrase:
+                                        phrases.append(phrase)
+                                elif isinstance(alt, str) and alt.strip():
+                                    phrases.append(alt.strip())
+                        if phrases:
+                            grammar_json = json.dumps(sorted(set(phrases)))
+                except Exception:
+                    grammar_json = ""
+
+            if grammar_json:
+                try:
+                    rec = vosk.KaldiRecognizer(model, wf.getframerate(), grammar_json)
+                except TypeError:
+                    rec = vosk.KaldiRecognizer(model, wf.getframerate())
+                    try:
+                        rec.SetGrammar(grammar_json)
+                    except Exception:
+                        pass
+            else:
+                rec = vosk.KaldiRecognizer(model, wf.getframerate())
             rec.SetWords(False)
 
             while True:
@@ -3494,6 +3628,15 @@ def quick_init(init: str) -> dict:
     return cfg
 
 
+def argv_to_cmd(args: List[str]) -> str:
+    if os.name == "nt":
+        return subprocess.list2cmdline([str(a) for a in (args or [])])
+    try:
+        return shlex.join([str(a) for a in (args or [])])
+    except Exception:
+        return " ".join(shlex.quote(str(a)) for a in (args or []))
+
+
 def expand_placeholders(args: List[str], shell: 'VoiceShell', config: dict, stt_file: Optional[str] = None) -> Optional[List[str]]:
     """Expand placeholders like {STT} in command arguments."""
     expanded = []
@@ -3519,7 +3662,7 @@ def expand_placeholders(args: List[str], shell: 'VoiceShell', config: dict, stt_
 
     if stt_used and config.get("auto_tts", True) and shell.tts:
         # If STT was used, speak the final command
-        cmd = " ".join(expanded)
+        cmd = argv_to_cmd(expanded)
         shell.tts.speak(cmd[:200])
     
     return expanded
@@ -3761,7 +3904,7 @@ def main():
                 return 1
 
             expanded = [str(a).replace("{STT}", text).replace("{STT_STREAM}", text) for a in rest]
-            cmd = " ".join(expanded)
+            cmd = argv_to_cmd(expanded)
 
             if dry_run:
                 print(cmd)
@@ -3868,7 +4011,7 @@ def main():
             expanded = expand_placeholders(rest, shell, config, stt_file=stt_file)
             if expanded is None:
                 return 1
-            cmd = " ".join(expanded)
+            cmd = argv_to_cmd(expanded)
             _, reason = check_command_safety(cmd, config, dry_run=True)
         if reason == "dry-run":
             try:
@@ -3881,7 +4024,7 @@ def main():
     if expanded is None:
         return 1
 
-    cmd = " ".join(expanded)
+    cmd = argv_to_cmd(expanded)
 
     # Safety check
     ok, reason = check_command_safety(cmd, config, dry_run)

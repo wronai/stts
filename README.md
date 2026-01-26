@@ -1,3 +1,4 @@
+![img.png](img.png)
 # 🎙️ stts - Universal Voice Shell
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -38,6 +39,8 @@ Każdy folder ma własne:
 użycie STT i TTS w komendzie shell:
 
 ```bash
+./stts | nlp2cmd -r --auto-confirm
+
 #tylko STT
 ./stts git commit -m "{STT}"
 # razem z TTS 
@@ -488,7 +491,19 @@ brew install espeak sox
 W trybie wrapper możesz użyć `{STT}` jako placeholdera, który zostanie zastąpiony transkryptem z mikrofonu:
 
 ```bash
-STTS_NLP2CMD_ENABLED=1 ./stts nlp2cmd -r "{STT}"
+STTS_NLP2CMD_ENABLED=1 ./stts nlp2cmd -r --query "{STT}" --auto-confirm
+```
+
+Debug (sprawdź quoting co dokładnie zostanie uruchomione):
+
+```bash
+STTS_NLP2CMD_ENABLED=1 ./stts --dry-run nlp2cmd -r --query "{STT}" --auto-confirm
+```
+
+Alternatywa (zawsze odporna na quoting): STT → stdout → `nlp2cmd stdin`:
+
+```bash
+./stts --stt-once | nlp2cmd -r stdin --auto-confirm
 ```
 
 `{STT_STREAM}` jest aliasem `{STT}` (MVP). Docelowo można tu podłączyć partial transcripts (live captions).

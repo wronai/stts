@@ -23,6 +23,26 @@ Python-only:
 ./python/stts --stt-stream-shell --cmd 'nlp2cmd -r --query "{STT}" --auto-confirm'
 ```
 
+## Wrapper: `{STT}` + nlp2cmd (quoting + debug)
+
+Najprostszy wariant (STT → nlp2cmd):
+
+```bash
+STTS_NLP2CMD_ENABLED=1 ./python/stts nlp2cmd -r --query "{STT}" --auto-confirm
+```
+
+Debug (zobacz co dokładnie zostanie uruchomione po podstawieniu `{STT}`):
+
+```bash
+STTS_NLP2CMD_ENABLED=1 ./python/stts --dry-run nlp2cmd -r --query "{STT}" --auto-confirm
+```
+
+Gotowy skrypt (mock STT, bez mikrofonu):
+
+```bash
+bash examples/nlp2cmd_placeholder.sh
+```
+
 CI/Docker one-shot (bez mikrofonu):
 
 ```bash

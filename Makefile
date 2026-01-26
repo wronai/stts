@@ -2,7 +2,7 @@
 # Makefile integration
 
 .PHONY: install test voice setup clean help setup-python setup-nodejs voice-python voice-nodejs gen-samples-python gen-samples-nodejs docker-build-python docker-build-nodejs docker-test-python docker-test-nodejs test-docker \
-	stt-vosk-pl stt-silero stt-whisper-stream tts-piper-pl tts-mimic3 tts-festival setup-local-full test-local
+	stt-vosk-pl stt-silero stt-whisper-stream tts-piper-pl tts-mimic3 tts-festival setup-local-full test-local fix-samples
 
 VERSION := $(shell cat VERSION 2>/dev/null || echo 0.0.0)
 
@@ -55,6 +55,9 @@ voice-nodejs:
 
 gen-samples-python:
 	@$(MAKE) -C python gen-samples
+
+fix-samples:
+	@$(MAKE) -C python fix-samples
 
 gen-samples-nodejs:
 	@$(MAKE) -C nodejs gen-samples
