@@ -3453,6 +3453,77 @@ def _wake_word_phrase_to_pattern(phrase: str) -> Optional[str]:
     return r"^" + r"\W*".join(parts) + r"\b"
 
 
+def generate_wake_word_variants(phrase: str, max_variants: int = 24) -> List[str]:
+    p0 = str(phrase or "").strip()
+    if not p0:
+        return []
+
+    p = re.sub(r"\s+", " ", p0)
+    low = p.lower()
+
+    out: List[str] = []
+    seen = set()
+
+    def _add(x: str):
+        s = str(x or "").strip()
+        if not s:
+            return
+        if len(out) >= int(max_variants or 0):
+            return
+        key = s.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        out.append(s)
+
+    _add(low)
+    _add(p)
+    if " " in low:
+        _add(low.replace(" ", ""))
+
+    trans_table = str.maketrans({
+        "ą": "a",
+        "ć": "c",
+        "ę": "e",
+        "ł": "l",
+        "ń": "n",
+        "ó": "u",
+        "ś": "s",
+        "ź": "z",
+        "ż": "z",
+    })
+    _add(low.translate(trans_table))
+
+    rules = [
+        ("hej", ["hey", "ej"]),
+        ("hey", ["hej", "ej"]),
+        ("ken", ["kan"]),
+        ("kan", ["ken"]),
+        ("ch", ["h"]),
+        ("h", ["ch"]),
+        ("rz", ["z"]),
+        ("sz", ["s"]),
+        ("cz", ["c"]),
+    ]
+
+    base_variants = list(out)
+    for src, reps in rules:
+        for v in base_variants:
+            if src not in v.lower():
+                continue
+            for r in reps:
+                _add(v.lower().replace(src, r))
+
+    for v in list(out):
+        v2 = v.lower()
+        if v2.startswith("h") and len(v2) > 2:
+            _add(v2[1:])
+        if v2.startswith("he") and len(v2) > 3:
+            _add(v2[2:])
+
+    return out
+
+
 def normalize_daemon_command(text: str) -> str:
     """Heurystyczna normalizacja komendy po wake-word (pod STT)."""
     s = (text or "").strip()
@@ -3977,6 +4048,24 @@ class VoiceShell:
                 wake_patterns = [pat]
                 log(f"wake-word: {ww}")
 
+        # For very short wake-words (e.g. "hej") Vosk often misses the token.
+        # Use a 2-stage mode: first recognize only the wake-word via Vosk grammar,
+        # then record a second utterance for the actual command (no grammar).
+        wake_only_two_stage = False
+        try:
+            if (self.config.get("stt_provider") == "vosk") and wake_word and len(ww) <= 3:
+                wake_only_two_stage = True
+                log("wake-word mode: two-stage (vosk grammar)")
+        except Exception:
+            wake_only_two_stage = False
+
+        prev_grammar = None
+        if wake_only_two_stage:
+            try:
+                prev_grammar = self.config.get("stt_vosk_grammar")
+            except Exception:
+                prev_grammar = None
+
         log("🔎 Checking nlp2cmd /health ...")
         if not nlp2cmd_service_health(nlp2cmd_url, timeout=2.5):
             log("❌ nlp2cmd service is not healthy / not reachable")
@@ -3997,9 +4086,31 @@ class VoiceShell:
             try:
                 # Continuous listening
                 log("🎤 Listening...")
-                text = self.listen()
+                if wake_only_two_stage:
+                    try:
+                        # Restrict decoding to wake-word only
+                        grammar_words = generate_wake_word_variants(ww, max_variants=24)
+                        if not grammar_words:
+                            grammar_words = [ww]
+                        log(f"wake-word grammar variants: {len(grammar_words)}")
+                        self.config["stt_vosk_grammar"] = json.dumps(grammar_words, ensure_ascii=False)
+                    except Exception:
+                        pass
+                    text = self.listen()
+                    # Restore grammar ASAP (command should not be restricted)
+                    try:
+                        if prev_grammar is None:
+                            self.config.pop("stt_vosk_grammar", None)
+                        else:
+                            self.config["stt_vosk_grammar"] = prev_grammar
+                    except Exception:
+                        pass
+                else:
+                    text = self.listen()
 
                 if not text:
+                    if wake_only_two_stage:
+                        log("⏭️  Wake-word stage: no transcript (try speaking louder / closer)")
                     continue
 
                 log(f"📝 Heard: {text}")
@@ -4012,10 +4123,12 @@ class VoiceShell:
                     continue
 
                 if not remaining:
-                    # Wake word only, listen for command
+                    # Wake word only (or two-stage wake-only mode), listen for command
                     log("🔔 Wake word detected, listening for command...")
                     if self.tts:
                         self.speak("Słucham")
+
+                    # In two-stage mode, always capture command in a separate utterance
                     remaining = self.listen()
                     if not remaining:
                         log("❌ No command heard")

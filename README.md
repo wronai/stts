@@ -591,6 +591,13 @@ Mów do mikrofonu:
 # Daemon mode: ustaw jedną frazę wake-word (tylko "hejken", bez "ken/kan" itd.)
 ./stts --daemon --nlp2cmd-url http://localhost:8008 --wake-word "hejken"
 
+Uwaga (Vosk): dla bardzo krótkich wake-word (np. `hej`, `hey`) STT często "gubi" token. Wtedy daemon przechodzi w tryb 2-etapowy:
+
+- **Etap 1:** nasłuchuje tylko wake-word z Vosk grammar (z automatycznie generowanymi wariantami fonetycznymi)
+- **Etap 2:** po wykryciu wake-word nagrywa osobno właściwą komendę (bez grammar)
+
+Jeśli zależy Ci na *maksymalnie ścisłym* wake-word bez wariantów, ustaw dłuższą frazę (np. `hejken`) zamiast bardzo krótkiej (np. `hej`).
+
 # Daemon mode: dłuższe wypowiedzi (domyślnie nagrywa max 5s)
 ./stts --daemon --nlp2cmd-url http://localhost:8008 --timeout 12 --vad-silence-ms 1200
 
