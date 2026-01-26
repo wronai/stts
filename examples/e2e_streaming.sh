@@ -28,6 +28,11 @@ run_test() {
   
   echo -n "[$name] "
   if output=$(eval "$cmd" 2>&1); then
+    if [ -z "$expect" ]; then
+      echo "✅ PASS"
+      ((PASSED++))
+      return 0
+    fi
     if echo "$output" | grep -qi "$expect"; then
       echo "✅ PASS"
       ((PASSED++))

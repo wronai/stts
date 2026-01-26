@@ -3532,6 +3532,9 @@ def main():
         print("\nOpcje bezpieczeństwa:")
         print("  --dry-run      Pokaż komendę bez wykonania")
         print("  --safe-mode    Zawsze pytaj przed wykonaniem")
+        print("\nSTT (override z CLI):")
+        print("  --stt-provider NAME   Nadpisz STT provider (np. whisper_cpp/vosk/deepgram)")
+        print("  --stt-model VALUE     Nadpisz model STT (np. small-pl dla vosk)")
         print("\nTryb voice-shell (placeholder):")
         print("  --stt-stream-shell   Pętla: STT(VAD) → podstaw {STT}/{STT_STREAM} → uruchom komendę")
         print("  --cmd CMD            Szablon komendy (np. 'nlp2cmd -r --query \"{STT}\" --auto-confirm')")
@@ -3758,6 +3761,9 @@ def main():
             print(text)
             return 0 if text else 1
         if text:
+            if dry_run:
+                print(text)
+                return 0
             translated = nlp2cmd_translate(text, config=config)
             if translated and nlp2cmd_confirm(translated):
                 text = translated
@@ -3766,6 +3772,24 @@ def main():
                 print(out, end="", flush=True)
             return code
         return 1
+
+    # Pipeline-friendly: allow piping a command into stts and asking for dry-run printing.
+    # Example: echo "rm -rf /" | ./stts --dry-run
+    if dry_run and (not rest) and (not stt_once) and (not stt_stream_shell) and (not tts_stdin) and (not tts_test_flag) and (not setup) and (not init) and (not sys.stdin.isatty()):
+        data = ""
+        try:
+            data = sys.stdin.read()
+        except Exception:
+            data = ""
+        lines = [l.strip() for l in (data or "").splitlines() if l.strip()]
+        cmd = lines[-1] if lines else ""
+        if not cmd:
+            return 1
+        try:
+            print(cmd)
+        except BrokenPipeError:
+            return 0
+        return 0
 
     if not rest:
         shell.run()

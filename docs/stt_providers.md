@@ -20,6 +20,24 @@ Example:
 STTS_DEEPGRAM_KEY=sk-... STTS_STT_PROVIDER=deepgram ./stts --stt-file python/samples/cmd_ls.wav --stt-only
 ```
 
+### Vosk (`stt_provider=vosk`)
+
+- Offline.
+- Very fast and lightweight, good for RPi/CPU.
+- Requires a Vosk model downloaded under `~/.config/stts-python/models/vosk/`.
+
+Install helper (downloads Polish model):
+
+```bash
+make stt-vosk-pl
+```
+
+Use:
+
+```bash
+STTS_STT_PROVIDER=vosk STTS_STT_MODEL=small-pl ./stts --stt-file python/samples/cmd_ls.wav --stt-only
+```
+
 ## Optional / roadmap (not implemented in stts yet)
 
 The items below are intentionally marked as *not implemented* in this repository right now. They are good candidates for real-time (<500ms) streaming STT.
@@ -43,5 +61,4 @@ Suggested approach:
 
 ### Vosk
 
-- Good for small devices (RPi).
-- Would require adding a new provider and model download instructions.
+Already implemented in `python/stts`.

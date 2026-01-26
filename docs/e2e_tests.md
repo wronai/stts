@@ -23,6 +23,23 @@ bash python/tests/docker_test.sh
 bash nodejs/tests/docker_test.sh
 ```
 
+## Local E2E suites (examples/)
+
+The repository also contains convenience scripts under `examples/`.
+
+```bash
+bash examples/e2e_all.sh
+```
+
+Or run a single suite:
+
+```bash
+bash examples/e2e_stt.sh
+bash examples/e2e_tts.sh
+bash examples/e2e_pipeline.sh
+bash examples/e2e_streaming.sh
+```
+
 ## Offline placeholder loop (Python)
 
 ```bash
@@ -36,4 +53,12 @@ This runs only when `STTS_DEEPGRAM_KEY` is set.
 
 ```bash
 STTS_DEEPGRAM_KEY=sk-... STTS_STT_PROVIDER=deepgram ./stts --stt-file python/samples/cmd_ls.wav --stt-only
+```
+
+## Benchmark (optional)
+
+Quick local performance/accuracy matrix (STT + TTS):
+
+```bash
+bash examples/benchmark.sh
 ```

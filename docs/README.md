@@ -15,3 +15,5 @@ Examples:
 - `examples/README.md`
 - `examples/e2e_offline.sh`
 - `examples/e2e_deepgram.sh`
+- `examples/e2e_all.sh`
+- `examples/benchmark.sh`

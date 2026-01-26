@@ -21,6 +21,11 @@ mkdir -p "$TMP_DIR"
 cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT
 
+# Default: do not play audio during benchmarks (still measures synthesis time)
+if [ -z "${STTS_TTS_NO_PLAY:-}" ]; then
+  export STTS_TTS_NO_PLAY=1
+fi
+
 _ts() {
   # monotonic timestamp in seconds (float)
   "$PYTHON" - <<'PY'
@@ -106,6 +111,13 @@ _expected_for() {
   echo ""
 }
 
+mapfile -t SAMPLE_FILES < <(find "$SAMPLES" -maxdepth 1 -type f -name '*.wav' | sort)
+
+if [ ${#SAMPLE_FILES[@]} -eq 0 ]; then
+  echo "No samples found in: $SAMPLES" >&2
+  exit 2
+fi
+
 echo "provider,kind,sample,expected,transcript,time_s,wer,cer,ratio,tts_provider" > "$OUT_CSV"
 
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -122,9 +134,12 @@ for i in "${!STT_PROVIDERS[@]}"; do
   provider="${STT_PROVIDERS[$i]}"
   model="${STT_MODELS[$i]}"
   
-  for sample in "${!SAMPLES_EXPECTED[@]}"; do
-    sample_path="$SAMPLES/$sample"
+  for sample_path in "${SAMPLE_FILES[@]}"; do
+    sample="$(basename "$sample_path")"
     expected="$(_expected_for "$sample_path")"
+    if [ -z "${expected}" ]; then
+      continue
+    fi
     
     if [ ! -f "$sample_path" ]; then
       continue
@@ -261,8 +276,12 @@ for si in "${!STT_PROVIDERS[@]}"; do
     tts_provider="${TTS_PROVIDERS[$ti]}"
     tts_voice="${TTS_VOICES[$ti]}"
     
-    for sample in "${!SAMPLES_EXPECTED[@]}"; do
-      sample_path="$SAMPLES/$sample"
+    for sample_path in "${SAMPLE_FILES[@]}"; do
+      sample="$(basename "$sample_path")"
+      expected="$(_expected_for "$sample_path")"
+      if [ -z "${expected}" ]; then
+        continue
+      fi
       
       if [ ! -f "$sample_path" ]; then
         continue
@@ -281,7 +300,6 @@ for si in "${!STT_PROVIDERS[@]}"; do
       # Step 1: STT
       transcription=$(eval "$stt_cmd" 2>/dev/null | tail -1) || transcription=""
       
-      expected="$(_expected_for "$sample_path")"
       wer=$(_wer "$expected" "$transcription")
 
       # Step 2: TTS (speak transcription)
@@ -306,6 +324,94 @@ for si in "${!STT_PROVIDERS[@]}"; do
       PIPELINE_RESULTS+=("$stt_provider|$tts_provider|$sample|$elapsed_raw|$wer")
     done
   done
+done
+
+echo ""
+
+# ============================================================================
+# Round-robin (alternating) pipeline benchmark
+# ============================================================================
+
+BENCH_ITERS=${STTS_BENCH_ITERS:-3}
+BENCH_WARMUP=${STTS_BENCH_WARMUP:-1}
+
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BLUE}  Round-robin STT×TTS Pipeline (alternating, iters=$BENCH_ITERS, warmup=$BENCH_WARMUP)${NC}"
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+
+COMBOS=()
+for si in "${!STT_PROVIDERS[@]}"; do
+  stt_provider="${STT_PROVIDERS[$si]}"
+  stt_model="${STT_MODELS[$si]}"
+  for ti in "${!TTS_PROVIDERS[@]}"; do
+    tts_provider="${TTS_PROVIDERS[$ti]}"
+    tts_voice="${TTS_VOICES[$ti]}"
+    COMBOS+=("$stt_provider|$stt_model|$tts_provider|$tts_voice")
+  done
+done
+
+declare -A RR_TIMES
+declare -A RR_WERS
+
+printf "%-15s %-15s %-10s %-10s %-10s\n" "STT" "TTS" "avg(s)" "p95(s)" "WER(avg)"
+echo "─────────────────────────────────────────────────────────────────────────────────"
+
+total_iters=$((BENCH_ITERS + BENCH_WARMUP))
+for iter in $(seq 1 "$total_iters"); do
+  for combo in "${COMBOS[@]}"; do
+    IFS='|' read -r stt_provider stt_model tts_provider tts_voice <<<"$combo"
+    key="$stt_provider|$tts_provider"
+
+    for sample_path in "${SAMPLE_FILES[@]}"; do
+      sample="$(basename "$sample_path")"
+      expected="$(_expected_for "$sample_path")"
+      if [ -z "${expected}" ]; then
+        continue
+      fi
+
+      stt_cmd="$PYTHON $STTS --stt-provider $stt_provider"
+      if [ -n "$stt_model" ]; then
+        stt_cmd="$stt_cmd --stt-model $stt_model"
+      fi
+      stt_cmd="$stt_cmd --stt-file $sample_path --stt-only"
+
+      start_time=$(_ts)
+      transcription=$(eval "$stt_cmd" 2>/dev/null | tail -1) || transcription=""
+      w=$(_wer "$expected" "$transcription")
+
+      if [ -n "$transcription" ]; then
+        STTS_TTS_PROVIDER="$tts_provider" STTS_TTS_VOICE="$tts_voice" \
+          $PYTHON $STTS --tts-test "$transcription" >/dev/null 2>&1 || true
+      fi
+
+      end_time=$(_ts)
+      elapsed_raw=$(_dt "$start_time" "$end_time")
+
+      # Ignore warmup iterations
+      if [ "$iter" -le "$BENCH_WARMUP" ]; then
+        continue
+      fi
+
+      RR_TIMES[$key]="${RR_TIMES[$key]:-} ${elapsed_raw}"
+      RR_WERS[$key]="${RR_WERS[$key]:-} ${w}"
+      echo "${stt_provider},rr_pipeline,${sample},\"${expected}\",\"${transcription}\",${elapsed_raw},${w},,,${tts_provider}" >> "$OUT_CSV"
+    done
+  done
+done
+
+for combo in "${COMBOS[@]}"; do
+  IFS='|' read -r stt_provider _ tts_provider _ <<<"$combo"
+  key="$stt_provider|$tts_provider"
+  times="${RR_TIMES[$key]:-}"
+  wers="${RR_WERS[$key]:-}"
+  if [ -z "$times" ]; then
+    continue
+  fi
+  read -r avg p50 p95 vmin vmax <<<"$(_stats $times | tr ',' ' ')"
+  read -r wavg wp50 wp95 wmin wmax <<<"$(_stats $wers | tr ',' ' ')"
+  printf "%-15s %-15s %-10s %-10s %-10s\n" \
+    "$stt_provider" "$tts_provider" "${avg}" "${p95}" "${wavg}"
 done
 
 echo ""

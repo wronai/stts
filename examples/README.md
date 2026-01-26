@@ -6,13 +6,13 @@ This folder contains runnable E2E (end-to-end) test scripts.
 
 ```bash
 # Run all tests
-./examples/e2e_all.sh
+bash examples/e2e_all.sh
 
 # Run specific test suite
-./examples/e2e_stt.sh       # STT providers only
-./examples/e2e_tts.sh       # TTS providers only
-./examples/e2e_pipeline.sh  # Full STT+TTS+execution
-./examples/e2e_streaming.sh # Streaming modes
+bash examples/e2e_stt.sh       # STT providers only
+bash examples/e2e_tts.sh       # TTS providers only
+bash examples/e2e_pipeline.sh  # Full STT+TTS+execution
+bash examples/e2e_streaming.sh # Streaming modes
 ```
 
 ## Test Suites

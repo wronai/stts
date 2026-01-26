@@ -11,6 +11,16 @@ Voice shell wrapper (STT+TTS) w Pythonie.
 ./stts make build
 ```
 
+### Nadpisanie STT z linii poleceń
+
+Możesz nadpisać providera/model STT bez zmiany `.env`:
+
+```bash
+./stts --stt-provider whisper_cpp --stt-file samples/cmd_ls.wav --stt-only
+./stts --stt-provider vosk --stt-model small-pl --stt-file samples/cmd_ls.wav --stt-only
+./stts --stt-provider deepgram --stt-file samples/cmd_ls.wav --stt-only
+```
+
 ## .env (konfiguracja)
 
 Skrypt automatycznie wczytuje `.env` (z katalogu uruchomienia, `python/` albo root repo).
