@@ -109,6 +109,45 @@ nlp2cmd -r "Pokaż użytkowników"
 nlp2cmd -r "otwórz https://www.prototypowanie.pl/kontakt/ i wypelnij formularz i wyslij"
 ```
 
+### NLP2CMD jako usługa (HTTP) + one-liner ze `stts`
+
+`nlp2cmd` ma tryb usługi (`nlp2cmd service`) – to jest wygodne, bo proces jest uruchomiony cały czas i nie płacisz kosztu startu przy każdym wywołaniu.
+
+Start usługi:
+
+```bash
+nlp2cmd service --host 127.0.0.1 --port 8000
+```
+
+Przykładowe zapytanie (curl):
+
+```bash
+curl -sS http://127.0.0.1:8000/query \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"list files","dsl":"auto"}'
+```
+
+One-liner: STT → HTTP service → wypisz samą komendę (wymaga `jq`):
+
+```bash
+./stts --stt-once | \
+  xargs -I{} curl -sS http://127.0.0.1:8000/query \
+    -H 'Content-Type: application/json' \
+    -d '{"query":"{}","dsl":"auto"}' | \
+  jq -r '.command'
+```
+
+One-liner bez `xargs` (bardziej odporny na cudzysłowy/znaki):
+
+```bash
+./stts --stt-once | \
+  jq -Rs '{query: ., dsl: "auto"}' | \
+  curl -sS http://127.0.0.1:8000/query \
+    -H 'Content-Type: application/json' \
+    -d @- | \
+  jq -r '.command'
+```
+
 ### `{STT}` placeholder (command wrapper)
 
 Możesz uruchomić dowolną komendę i wstawić transkrypt z mikrofonu jako `{STT}`:

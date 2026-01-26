@@ -22,6 +22,7 @@ import subprocess
 import platform
 import shutil
 import urllib.request
+import urllib.parse
 import tarfile
 import zipfile
 import threading
@@ -1811,6 +1812,84 @@ class WhisperCppSTT(STTProvider):
             return ""
 
 
+class DeepgramSTT(STTProvider):
+    name = "deepgram"
+    description = "Online STT (Deepgram REST)"
+    min_ram_gb = 0.1
+
+    @classmethod
+    def is_available(cls, info: SystemInfo):
+        key = os.environ.get("STTS_DEEPGRAM_KEY", "").strip()
+        if not key:
+            return False, "set STTS_DEEPGRAM_KEY"
+        return True, "Deepgram key set"
+
+    @classmethod
+    def get_recommended_model(cls, info: SystemInfo) -> Optional[str]:
+        return "nova-2"
+
+    def transcribe(self, audio_path: str) -> str:
+        key = os.environ.get("STTS_DEEPGRAM_KEY", "").strip()
+        if not key:
+            return ""
+
+        model = (
+            (self.config.get("stt_model") if isinstance(self.config, dict) else None)
+            or os.environ.get("STTS_DEEPGRAM_MODEL", "")
+            or "nova-2"
+        )
+        model = str(model).strip() or "nova-2"
+
+        language = (
+            (self.language or "pl")
+            if str(self.language or "").strip()
+            else (os.environ.get("STTS_LANGUAGE", "pl") or "pl")
+        )
+        language = str(language).strip() or "pl"
+
+        try:
+            data = Path(audio_path).read_bytes()
+        except Exception:
+            return ""
+
+        params = {
+            "model": model,
+            "language": language,
+            "smart_format": "true",
+        }
+        url = "https://api.deepgram.com/v1/listen?" + urllib.parse.urlencode(params)
+        req = urllib.request.Request(
+            url,
+            data=data,
+            method="POST",
+            headers={
+                "Authorization": f"Token {key}",
+                "Content-Type": "audio/wav",
+            },
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                payload = resp.read().decode("utf-8", errors="replace")
+        except Exception as e:
+            cprint(Colors.RED, f"❌ Deepgram error: {e}")
+            return ""
+
+        try:
+            j = json.loads(payload)
+            txt = (
+                (((j.get("results") or {}).get("channels") or [None])[0] or {}).get("alternatives") or [None]
+            )[0]
+            if isinstance(txt, dict):
+                transcript = (txt.get("transcript") or "").strip()
+            else:
+                transcript = ""
+        except Exception:
+            transcript = ""
+
+        return TextNormalizer.normalize(transcript, self.language)
+
+
 class TTSProvider:
     name: str = "base"
 
@@ -2125,7 +2204,7 @@ class FliteTTS(TTSProvider):
             return
 
 
-STT_PROVIDERS = {"whisper_cpp": WhisperCppSTT}
+STT_PROVIDERS = {"whisper_cpp": WhisperCppSTT, "deepgram": DeepgramSTT}
 TTS_PROVIDERS = {"espeak": EspeakTTS, "piper": PiperTTS, "spd-say": SpdSayTTS, "say": SayTTS, "flite": FliteTTS}
 
 
@@ -2494,18 +2573,28 @@ def nlp2cmd_translate(text: str, config: Optional[dict] = None, force: bool = Fa
 
     text = TextNormalizer.normalize(text or "")
 
+    def _normalize_cmd(s: str) -> str:
+        out = (s or "").strip()
+        if out.startswith("$"):
+            out = out.lstrip("$").strip()
+        out = re.sub(r"^\d+[\.)]\s*", "", out)
+        out = re.sub(r"^-\s+", "", out)
+        return out.strip()
+
     if force:
         nlp2cmd_prewarm_force()
         if _NLP2CMD_WORKER is not None:
             cmd = _NLP2CMD_WORKER.translate(text)
             if cmd:
-                return cmd
+                cmd2 = _normalize_cmd(cmd)
+                return cmd2 or None
     elif _nlp2cmd_parallel_enabled(config):
         nlp2cmd_prewarm(config)
         if _NLP2CMD_WORKER is not None:
             cmd = _NLP2CMD_WORKER.translate(text)
             if cmd:
-                return cmd
+                cmd2 = _normalize_cmd(cmd)
+                return cmd2 or None
 
     bin_name = os.environ.get("STTS_NLP2CMD_BIN", "nlp2cmd")
     args = shlex.split(os.environ.get("STTS_NLP2CMD_ARGS", "-r"))
@@ -2546,7 +2635,8 @@ def nlp2cmd_translate(text: str, config: Optional[dict] = None, force: bool = Fa
                     cprint(Colors.YELLOW, f"⚠️  Wykryto SQL (nie shell): {candidate[:60]}...")
                     cprint(Colors.CYAN, "💡 Użyj: ./stts sqlite3 db.sqlite \"{STT}\" lub ./stts psql -c \"{STT}\"")
                     return None
-                return candidate
+                candidate2 = _normalize_cmd(candidate)
+                return candidate2 or None
 
         for l in lines:
             if l.startswith("```"):
@@ -2566,7 +2656,8 @@ def nlp2cmd_translate(text: str, config: Optional[dict] = None, force: bool = Fa
                 cprint(Colors.CYAN, "💡 Użyj: ./stts sqlite3 db.sqlite \"{STT}\" lub ./stts psql -c \"{STT}\"")
                 return None
             if re.match(r"^[a-zA-Z0-9_./-]+(\s+.+)?$", l):
-                return l
+                l2 = _normalize_cmd(l)
+                return l2 or None
 
         return None
     except Exception:
@@ -3021,6 +3112,8 @@ def parse_args(argv: List[str]):
     stt_file = None
     stt_only = False
     stt_once = False
+    stt_stream_shell = False
+    stream_shell_cmd = None
     setup = False
     init = None
     tts_provider = None
@@ -3048,6 +3141,10 @@ def parse_args(argv: List[str]):
             stt_only = True
         elif a == "--stt-once":
             stt_once = True
+        elif a == "--stt-stream-shell":
+            stt_stream_shell = True
+        elif a == "--cmd":
+            stream_shell_cmd = next(it, None)
         elif a == "--setup":
             setup = True
         elif a == "--init":
@@ -3092,7 +3189,7 @@ def parse_args(argv: List[str]):
             help_ = True
         else:
             rest.append(a)
-    return stt_file, stt_only, stt_once, setup, init, tts_provider, tts_voice, tts_stdin, tts_test, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, list_tts, nlp2cmd_parallel, rest
+    return stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, list_tts, nlp2cmd_parallel, rest
 
 
 def tts_test(shell: "VoiceShell", text: str) -> int:
@@ -3108,26 +3205,72 @@ def tts_test(shell: "VoiceShell", text: str) -> int:
         return 3
 
 
+def apply_quick_tts(config: dict, tts_provider: Optional[str], tts_voice: Optional[str]) -> dict:
+    cfg = dict(config or {})
+    if tts_provider is not None:
+        v = str(tts_provider).strip()
+        if v == "espeak-ng":
+            v = "espeak"
+        cfg["tts_provider"] = v or None
+    if tts_voice is not None:
+        cfg["tts_voice"] = str(tts_voice).strip() or cfg.get("tts_voice")
+    return cfg
+
+
+def quick_init(init: str) -> dict:
+    cfg = load_config()
+    s = str(init or "").strip()
+    if not s:
+        return cfg
+
+    provider = s
+    model = None
+    if ":" in s:
+        provider, model = s.split(":", 1)
+        provider = provider.strip()
+        model = (model or "").strip() or None
+
+    if provider in ("whisper", "whisper.cpp"):
+        provider = "whisper_cpp"
+
+    cfg["stt_provider"] = provider or None
+    if model is not None:
+        cfg["stt_model"] = model
+
+    save_config(cfg)
+
+    try:
+        if provider == "whisper_cpp" and model:
+            WhisperCppSTT.download_model(model)
+    except Exception:
+        pass
+
+    return cfg
+
+
 def expand_placeholders(args: List[str], shell: 'VoiceShell', config: dict) -> Optional[List[str]]:
     """Expand placeholders like {STT} in command arguments."""
     expanded = []
     stt_used = False
-    
+
+    needs_stt = any(("{STT}" in a) or ("{STT_STREAM}" in a) for a in args)
+    text = None
+    if needs_stt:
+        stt_used = True
+        # Listen for speech input
+        with contextlib.redirect_stdout(sys.stderr):
+            text = shell.listen()
+        if not text:
+            cprint(Colors.RED, "❌ No speech input captured")
+            return None
+
     for arg in args:
-        if "{STT}" in arg:
-            stt_used = True
-            # Listen for speech input
-            with contextlib.redirect_stdout(sys.stderr):
-                text = shell.listen()
-            if not text:
-                cprint(Colors.RED, "❌ No speech input captured")
-                return None
-            # Replace {STT} with the captured text
-            expanded_arg = arg.replace("{STT}", text)
+        if text is not None:
+            expanded_arg = arg.replace("{STT}", text).replace("{STT_STREAM}", text)
             expanded.append(expanded_arg)
         else:
             expanded.append(arg)
-    
+
     if stt_used and config.get("auto_tts", True) and shell.tts:
         # If STT was used, speak the final command
         cmd = " ".join(expanded)
@@ -3138,7 +3281,7 @@ def expand_placeholders(args: List[str], shell: 'VoiceShell', config: dict) -> O
 
 def main():
     config = load_config()
-    stt_file, stt_only, stt_once, setup, init, tts_provider, tts_voice, tts_stdin, tts_test_flag, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, list_tts, nlp2cmd_parallel, rest = parse_args(sys.argv[1:])
+    stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test_flag, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, list_tts, nlp2cmd_parallel, rest = parse_args(sys.argv[1:])
 
     if (not stt_once) and (not stt_file) and (not rest) and (not tts_stdin) and (not tts_test_flag) and (not setup) and (not init):
         if sys.stdin.isatty() and (not sys.stdout.isatty()):
@@ -3162,6 +3305,9 @@ def main():
         print("\nOpcje bezpieczeństwa:")
         print("  --dry-run      Pokaż komendę bez wykonania")
         print("  --safe-mode    Zawsze pytaj przed wykonaniem")
+        print("\nTryb voice-shell (placeholder):")
+        print("  --stt-stream-shell   Pętla: STT(VAD) → podstaw {STT}/{STT_STREAM} → uruchom komendę")
+        print("  --cmd CMD            Szablon komendy (np. 'nlp2cmd -r --query \"{STT}\" --auto-confirm')")
         print("\nSzybkość / interaktywność:")
         print("  --stream / --no-stream     Strumieniuj output komendy (bez buforowania)")
         print("  --fast-start / --full-start Szybszy start (mniej detekcji sprzętu)")
@@ -3225,6 +3371,65 @@ def main():
 
     if tts_stdin:
         return tts_from_stdin(shell)
+
+    if stt_stream_shell:
+        if not stream_shell_cmd:
+            cprint(Colors.RED, "❌ Brak --cmd w trybie --stt-stream-shell")
+            return 2
+
+        PS1 = f"{Colors.GREEN}🔴 captions>{Colors.NC} "
+        print("Voice shell (placeholder): mów do mikrofonu, STT wstawiane w {STT}/{STT_STREAM}. CTRL+C = pomiń, CTRL+D = wyjście", file=sys.stderr)
+
+        one_shot = bool(stt_file)
+        while True:
+            try:
+                if sys.stdin.isatty() and (not one_shot):
+                    _ = input(PS1)
+
+                with contextlib.redirect_stdout(sys.stderr):
+                    text = shell.listen(stt_file=stt_file) if stt_file else shell.listen()
+
+                if not text:
+                    if one_shot:
+                        return 1
+                    continue
+
+                t = (text or "").strip()
+                if t.lower() in ("exit", "quit", "q"):
+                    return 0
+
+                print(f"📝 {t}", file=sys.stderr)
+
+                cmd = (stream_shell_cmd or "").replace("{STT}", t).replace("{STT_STREAM}", t)
+
+                if dry_run:
+                    print(cmd)
+                    if one_shot:
+                        return 0
+                    continue
+
+                ok, reason = check_command_safety(cmd, config, dry_run)
+                if not ok:
+                    if one_shot:
+                        return 0 if reason == "dry-run" else 1
+                    continue
+
+                out, code, printed = shell.run_command_any(cmd)
+                if out.strip() and not printed:
+                    print(out, end="", flush=True)
+                lines = [l.strip() for l in out.splitlines() if l.strip()]
+                if lines and shell.tts and config.get("auto_tts", True):
+                    shell.tts.speak(lines[-1][:200])
+
+                if one_shot:
+                    return code
+            except KeyboardInterrupt:
+                print("", file=sys.stderr)
+                if one_shot:
+                    return 130
+                continue
+            except EOFError:
+                return 0
 
     if stt_once:
         # Pipeline-friendly mode: transcript to stdout, all prompts/status to stderr

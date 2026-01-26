@@ -73,6 +73,25 @@ nlp2cmd -r "Pokaż użytkowników"
 nlp2cmd -r "otwórz https://www.prototypowanie.pl/kontakt/ i wypelnij formularz i wyslij"
 ```
 
+### NLP2CMD jako usługa (HTTP) + one-liner
+
+Jeśli uruchomisz `nlp2cmd` w trybie usługi, możesz wysyłać tekst po HTTP:
+
+```bash
+nlp2cmd service --host 127.0.0.1 --port 8000
+```
+
+One-liner: STT → HTTP service → wypisz samą komendę (wymaga `jq`):
+
+```bash
+./stts.mjs --stt-file samples/cmd_ls.wav --stt-only | \
+  jq -Rs '{query: ., dsl: "auto"}' | \
+  curl -sS http://127.0.0.1:8000/query \
+    -H 'Content-Type: application/json' \
+    -d @- | \
+  jq -r '.command'
+```
+
 ### Prewarm / tryb równoległy (mniejsze opóźnienie)
 
 `nlp2cmd` jest pakietem Pythona i potrafi mieć zauważalny koszt startu.
