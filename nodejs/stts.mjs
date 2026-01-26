@@ -311,21 +311,139 @@ function hasGpuBuild() {
     return existsSync(marker);
 }
 
-function nlp2cmdTranslate(text) {
-    const enabled = String(process.env.STTS_NLP2CMD_ENABLED || '0').trim().toLowerCase();
-    if (!['1', 'true', 'yes', 'y'].includes(enabled)) return null;
+function nlp2cmdParallelEnabled(config) {
+    if (config && !!config.nlp2cmd_parallel) return true;
+    const v = String(process.env.STTS_NLP2CMD_PARALLEL || '').trim().toLowerCase();
+    return ['1', 'true', 'yes', 'y'].includes(v);
+}
+
+function resolveNlp2cmdPython() {
+    const v = String(process.env.STTS_NLP2CMD_PYTHON || '').trim();
+    return v || 'python3';
+}
+
+class Nlp2cmdWorker {
+    constructor(pythonExe) {
+        const code =
+            `import sys, json\n` +
+            `pipeline = None\nerr = None\n` +
+            `try:\n` +
+            `    from nlp2cmd.generation.pipeline import RuleBasedPipeline\n` +
+            `    pipeline = RuleBasedPipeline(use_enhanced_context=False)\n` +
+            `except Exception as e:\n` +
+            `    err = str(e)\n` +
+            `for line in sys.stdin:\n` +
+            `    s = (line or '').strip()\n` +
+            `    if not s:\n` +
+            `        continue\n` +
+            `    try:\n` +
+            `        req = json.loads(s)\n` +
+            `    except Exception:\n` +
+            `        req = {'text': s}\n` +
+            `    text = str(req.get('text', '') or '')\n` +
+            `    if not pipeline:\n` +
+            `        out = {'ok': False, 'command': '', 'error': err or 'nlp2cmd not available'}\n` +
+            `    else:\n` +
+            `        try:\n` +
+            `            r = pipeline.process(text)\n` +
+            `            cmd = (getattr(r, 'command', '') or '').strip()\n` +
+            `            out = {'ok': bool(cmd), 'command': cmd, 'error': ''}\n` +
+            `        except Exception as e:\n` +
+            `            out = {'ok': False, 'command': '', 'error': str(e)}\n` +
+            `    sys.stdout.write(json.dumps(out, ensure_ascii=False) + '\\n')\n` +
+            `    sys.stdout.flush()\n`;
+
+        const env = { ...process.env };
+        if (env.NLP2CMD_USE_ENHANCED_CONTEXT === undefined) env.NLP2CMD_USE_ENHANCED_CONTEXT = '0';
+
+        this.proc = spawn(pythonExe, ['-u', '-c', code], { stdio: ['pipe', 'pipe', 'ignore'], env });
+        this._buf = '';
+        this._queue = [];
+
+        this.proc.stdout.on('data', (chunk) => {
+            this._buf += String(chunk || '');
+            while (true) {
+                const idx = this._buf.indexOf('\n');
+                if (idx < 0) break;
+                const line = this._buf.slice(0, idx).trim();
+                this._buf = this._buf.slice(idx + 1);
+                const item = this._queue.shift();
+                if (!item) continue;
+                clearTimeout(item.t);
+                let cmd = null;
+                try {
+                    const res = JSON.parse(line);
+                    cmd = String(res.command || '').trim() || null;
+                } catch {
+                    cmd = null;
+                }
+                item.resolve(cmd);
+            }
+        });
+
+        this.proc.on('exit', () => {
+            for (const item of this._queue.splice(0)) {
+                clearTimeout(item.t);
+                item.resolve(null);
+            }
+        });
+    }
+
+    translate(text, timeoutMs = 20000) {
+        const s = String(text || '').trim();
+        if (!s) return Promise.resolve(null);
+        if (!this.proc || this.proc.killed) return Promise.resolve(null);
+        if (!this.proc.stdin) return Promise.resolve(null);
+
+        return new Promise((resolve) => {
+            const t = setTimeout(() => resolve(null), timeoutMs);
+            this._queue.push({ resolve, t });
+            try {
+                this.proc.stdin.write(`${JSON.stringify({ text: s })}\n`);
+            } catch {
+                clearTimeout(t);
+                this._queue.pop();
+                resolve(null);
+            }
+        });
+    }
+}
+
+let NLP2CMD_WORKER = null;
+
+function nlp2cmdPrewarm(config) {
+    if (!nlp2cmdParallelEnabled(config)) return;
+    if (NLP2CMD_WORKER) return;
+    try {
+        NLP2CMD_WORKER = new Nlp2cmdWorker(resolveNlp2cmdPython());
+    } catch {
+        NLP2CMD_WORKER = null;
+    }
+}
+
+async function nlp2cmdTranslate(text, { config = null, force = false } = {}) {
+    if (!force) {
+        const enabled = String(process.env.STTS_NLP2CMD_ENABLED || '0').trim().toLowerCase();
+        if (!['1', 'true', 'yes', 'y'].includes(enabled)) return null;
+    }
 
     text = normalizeSTTText(text || '', process.env.STTS_LANGUAGE || 'pl');
- 
+
+    if (nlp2cmdParallelEnabled(config)) {
+        nlp2cmdPrewarm(config);
+        if (NLP2CMD_WORKER) {
+            const cmd = await NLP2CMD_WORKER.translate(text);
+            if (cmd) return cmd;
+        }
+    }
+
     const bin = process.env.STTS_NLP2CMD_BIN || 'nlp2cmd';
     const args = (process.env.STTS_NLP2CMD_ARGS || '-r').split(/\s+/).filter(Boolean);
-
     const res = spawnSync(bin, [...args, text], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     const out = String(res.stdout || '') + String(res.stderr || '');
     const lines = out.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     if (!lines.length) return null;
 
-    // heuristic: first plausible command line
     for (const l of lines) {
         if (l.startsWith('```')) continue;
         if (l.startsWith('📊')) continue;
@@ -1086,7 +1204,7 @@ async function voiceShell(config) {
                     prompt();
                     return;
                 }
-                const translated = nlp2cmdTranslate(cmd);
+                const translated = await nlp2cmdTranslate(nl, { config });
                 if (!translated || !nlp2cmdConfirm(translated)) {
                     prompt();
                     return;
@@ -1095,12 +1213,13 @@ async function voiceShell(config) {
             }
 
             if (!cmd) {
+                nlp2cmdPrewarm(config);
                 cmd = await listen(config);
                 if (!cmd) {
                     prompt();
                     return;
                 }
-                const translated = nlp2cmdTranslate(cmd);
+                const translated = await nlp2cmdTranslate(cmd, { config });
                 if (translated && nlp2cmdConfirm(translated)) {
                     cmd = translated;
                 }
@@ -1242,6 +1361,7 @@ async function main() {
     }
 
     if (sttFile) {
+        nlp2cmdPrewarm(config);
         const shellText = await listen(config, sttFile);
         if (sttOnly) {
             console.log(shellText);
@@ -1249,7 +1369,7 @@ async function main() {
         }
         if (!shellText) process.exit(1);
         let cmd = shellText;
-        const translated = nlp2cmdTranslate(cmd);
+        const translated = await nlp2cmdTranslate(cmd, { config });
         if (translated && nlp2cmdConfirm(translated)) cmd = translated;
         const { output, code, printed } = await runCommand(cmd, { stream: !!config.stream_cmd });
         if (!printed && output.trim()) console.log(output);
@@ -1267,10 +1387,11 @@ async function main() {
             const runMode = rest.includes('-r') || rest.includes('--run');
             const autoConfirm = rest.includes('--auto-confirm');
 
+            nlp2cmdPrewarm(config);
             const shellText = await listen(config);
             if (!shellText) process.exit(1);
 
-            const translated = nlp2cmdTranslate(shellText);
+            const translated = await nlp2cmdTranslate(shellText, { config, force: true });
             if (!translated) process.exit(1);
 
             if (!autoConfirm) {
