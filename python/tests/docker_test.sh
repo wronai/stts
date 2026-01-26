@@ -12,8 +12,15 @@ export STTS_MOCK_STT=1
 echo "== STT only (mock) =="
 python3 "$ROOT/stts" --stt-file "$ROOT/samples/cmd_echo_hello.wav" --stt-only | grep -q "echo hello"
 
+echo "== STT once (mock, pipeline mode) =="
+python3 "$ROOT/stts" --stt-file "$ROOT/samples/cmd_echo_hello.wav" --stt-once | grep -q "echo hello"
+
 echo "== Execute from STT file (mock) =="
 out=$(python3 "$ROOT/stts" --stt-file "$ROOT/samples/cmd_echo_hello.wav")
 echo "$out" | grep -q "hello"
+
+echo "== STT stream shell (mock, placeholder, dry-run) =="
+out=$(python3 "$ROOT/stts" --stt-file "$ROOT/samples/cmd_echo_hello.wav" --stt-stream-shell --cmd "echo '{STT_STREAM}'" --dry-run)
+echo "$out" | grep -q "echo hello"
 
 echo "✅ docker_test passed"

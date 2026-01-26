@@ -16,4 +16,8 @@ echo "== Execute from STT file (mock) =="
 out=$(node "$ROOT/stts.mjs" --stt-file "$ROOT/samples/cmd_echo_hello.wav")
 echo "$out" | grep -q "hello"
 
+echo "== Placeholder {STT} (mock) =="
+out=$(node "$ROOT/stts.mjs" --stt-file "$ROOT/samples/cmd_echo_hello.wav" echo "{STT}")
+echo "$out" | grep -q "echo hello"
+
 echo "✅ docker_test passed"
