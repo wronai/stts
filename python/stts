@@ -3426,6 +3426,31 @@ def tts_test(shell: "VoiceShell", text: str) -> int:
         return 3
 
 
+def tts_from_stdin(shell: "VoiceShell") -> int:
+    data = ""
+    try:
+        data = sys.stdin.read()
+    except Exception:
+        data = ""
+
+    if data:
+        try:
+            print(data, end="")
+        except BrokenPipeError:
+            return 0
+
+    lines = [l.strip() for l in (data or "").splitlines() if l.strip()]
+    last = lines[-1] if lines else ""
+    if not last:
+        return 1
+
+    try:
+        shell.speak(last)
+    except Exception:
+        pass
+    return 0
+
+
 def apply_quick_tts(config: dict, tts_provider: Optional[str], tts_voice: Optional[str]) -> dict:
     cfg = dict(config or {})
     if tts_provider is not None:

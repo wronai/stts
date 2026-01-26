@@ -2,6 +2,17 @@
 
 ## Implemented (today)
 
+STT provider można ustawić:
+
+- przez env: `STTS_STT_PROVIDER`, `STTS_STT_MODEL`
+- przez CLI (nadpisuje config/env): `--stt-provider`, `--stt-model`
+
+Szybki check:
+
+```bash
+./stts --list-stt
+```
+
 ### whisper.cpp (`stt_provider=whisper_cpp`)
 
 - Offline.
@@ -17,7 +28,7 @@
 Example:
 
 ```bash
-STTS_DEEPGRAM_KEY=sk-... STTS_STT_PROVIDER=deepgram ./stts --stt-file python/samples/cmd_ls.wav --stt-only
+STTS_DEEPGRAM_KEY=sk-... ./stts --stt-provider deepgram --stt-file python/samples/cmd_ls.wav --stt-only
 ```
 
 ### Vosk (`stt_provider=vosk`)
@@ -35,7 +46,7 @@ make stt-vosk-pl
 Use:
 
 ```bash
-STTS_STT_PROVIDER=vosk STTS_STT_MODEL=small-pl ./stts --stt-file python/samples/cmd_ls.wav --stt-only
+./stts --stt-provider vosk --stt-model small-pl --stt-file python/samples/cmd_ls.wav --stt-only
 ```
 
 ## Optional / roadmap (not implemented in stts yet)

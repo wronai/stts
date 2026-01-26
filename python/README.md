@@ -21,6 +21,55 @@ Możesz nadpisać providera/model STT bez zmiany `.env`:
 ./stts --stt-provider deepgram --stt-file samples/cmd_ls.wav --stt-only
 ```
 
+## Benchmark: porównanie STT/TTS (latency + precyzja)
+
+Pomiary z `./examples/benchmark.sh`.
+
+Uwaga o precyzji (accuracy): próbki w `python/samples/*.wav` są generowane przez TTS (np. `espeak`) i następnie rozpoznawane przez STT.
+To jest dobre jako test regresji i pipeline, ale **nie jest miarą jakości rozpoznawania z mikrofonu**.
+
+Metryki:
+
+- **avg/p95**: średnie i 95-percentyl czasu.
+- **WER**: word error rate (0.0 = idealnie, 1.0 = źle).
+
+### STT (Speech-to-Text)
+
+| Provider | Model | avg latency (s) | p95 latency (s) | WER (avg) | Notes |
+|---|---:|---:|---:|---:|---|
+| `whisper_cpp` | `base` | ~0.86 | ~1.12 | ~1.00 | szybki, ale syntetyczne próbki mogą być rozpoznawane jako `[MUZYKA]` |
+| `vosk` | `small-pl` | ~1.22 | ~1.40 | ~1.00 | stabilny offline, ale accuracy zależy od jakości próbek |
+
+### TTS (Text-to-Speech)
+
+Pomiary TTS w benchmarku są wykonywane z `STTS_TTS_NO_PLAY=1` (bez odtwarzania audio), aby mierzyć samą syntezę.
+
+| Provider | Voice | avg latency (s) | p95 latency (s) | Notes |
+|---|---:|---:|---:|---|
+| `piper` | `pl` (alias → `pl_PL-gosia-medium`) | ~0.50 | ~0.54 | neural, najlepsza jakość |
+| `espeak` | `pl` | ~0.13 | ~0.13 | najszybszy, ale gorsza jakość |
+
+### Pipeline STT→TTS (round-robin, na przemian)
+
+Benchmark testuje kombinacje STT×TTS w trybie „na przemian” (round-robin) z warmup i N iteracji, podając avg/p95.
+
+| STT | TTS | avg total (s) | p95 total (s) |
+|---|---|---:|---:|
+| `whisper_cpp` | `piper` | ~1.21 | ~1.28 |
+| `whisper_cpp` | `espeak` | ~0.90 | ~1.01 |
+| `vosk` | `piper` | ~1.73 | ~2.03 |
+| `vosk` | `espeak` | ~1.43 | ~1.88 |
+
+### Jak odtworzyć benchmark
+
+Uruchom z root repo:
+
+```bash
+STTS_BENCH_WARMUP=1 STTS_BENCH_ITERS=3 ./examples/benchmark.sh
+```
+
+Wyniki CSV są zapisywane w `/tmp/stts_benchmark_*/results.csv`.
+
 ## .env (konfiguracja)
 
 Skrypt automatycznie wczytuje `.env` (z katalogu uruchomienia, `python/` albo root repo).
@@ -44,6 +93,11 @@ Najważniejsze zmienne:
 - `STTS_FAST_START=1` - szybszy start (mniej detekcji sprzętu)
 - `STTS_STT_GPU_LAYERS=35` - whisper.cpp: liczba warstw na GPU (`-ngl`, wymaga build GPU)
 - `STTS_STT_PROMPT=...` - whisper.cpp: prompt (jeśli binarka wspiera `--prompt` / `-p`)
+- `STTS_TTS_NO_PLAY=1` - nie odtwarzaj audio (przydatne w CI/Docker)
+- `STTS_WHISPER_MAX_LEN=...` - whisper.cpp: `-ml` (opcjonalnie)
+- `STTS_WHISPER_WORD_THOLD=...` - whisper.cpp: `-wt` (opcjonalnie)
+- `STTS_WHISPER_NO_SPEECH_THOLD=...` - whisper.cpp: `-nth` (opcjonalnie)
+- `STTS_WHISPER_ENTROPY_THOLD=...` - whisper.cpp: `-et` (opcjonalnie)
 - `STTS_GPU_ENABLED=1` - wymuś budowę whisper.cpp z CUDA przy instalacji
 
 ### Deepgram (online STT)
@@ -183,7 +237,24 @@ One-liner bez `xargs` (bardziej odporny na cudzysłowy/znaki):
 Możesz uruchomić dowolną komendę i wstawić transkrypt z mikrofonu jako `{STT}`:
 
 ```bash
-STTS_NLP2CMD_ENABLED=1 STTS_NLP2CMD_PARALLEL=1 ./stts nlp2cmd -r "{STT}" --auto-confirm
+STTS_NLP2CMD_ENABLED=1 STTS_NLP2CMD_PARALLEL=1 ./stts nlp2cmd -r --query "{STT}" --auto-confirm
+```
+
+`{STT_STREAM}` jest aliasem `{STT}` (MVP).
+
+### Voice-driven REPL (placeholder shell)
+
+Tryb `--stt-stream-shell` działa jak mini-shell: w pętli nasłuchuje audio, robi STT (VAD stop), podstawia `{STT}` i uruchamia komendę-szablon.
+
+```bash
+./stts --stt-stream-shell --cmd 'nlp2cmd -r --query "{STT}" --auto-confirm'
+```
+
+W CI/Docker możesz zrobić one-shot przez `--stt-file`:
+
+```bash
+STTS_MOCK_STT=1 ./stts --stt-file samples/cmd_ls.wav \
+  --stt-stream-shell --cmd 'echo "{STT}"' --dry-run
 ```
 
 ### Pipeline (jednorazowe STT → stdout)
@@ -192,6 +263,12 @@ Tryb `--stt-once` wypisuje sam transkrypt na stdout (logi idą na stderr), więc
 
 ```bash
 ./stts --stt-once | xargs -I{} nlp2cmd -r "{}"
+```
+
+Alternatywnie, bezpośrednio przez `stts` (stdin → nlp2cmd):
+
+```bash
+./stts --stt-once | ./stts nlp2cmd -r stdin --auto-confirm
 ```
 
 ### Pipeline (TTS na końcu)
@@ -221,7 +298,10 @@ Przykład: wygeneruj komendę i przeczytaj ją na głos (bez wykonania):
 ./stts --stream "make build"          # output na żywo
 ./stts --fast-start                   # szybszy start (domyślnie)
 ./stts --full-start                   # pełna detekcja sprzętu
+./stts --list-stt                     # lista providerów STT
 ./stts --list-tts                     # lista providerów TTS
+
+./stts --stt-provider vosk --stt-model small-pl --stt-file samples/cmd_ls.wav --stt-only
 ```
 
 ### whisper.cpp + GPU (CUDA)

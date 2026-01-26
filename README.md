@@ -60,7 +60,11 @@ STTS_GPU_ENABLED=1 STTS_FAST_START=1 ./stts
 
 Uruchamianie komend shell nawet z błędami fonetycznymi za pomocą nlp2cmd:
 ```bash
-./stts nlp2cmd -r "{STT}" --auto-confirm | ./stts --tts-stdin
+# tryb shell z placeholderem (voice-driven REPL)
+./stts --stt-stream-shell --cmd 'nlp2cmd -r --query "{STT}" --auto-confirm'
+
+# tryb pipeline (1 rozpoznanie -> 1 komenda)
+./stts --stt-once | ./stts nlp2cmd -r stdin --auto-confirm --run
 ```
 
 output
@@ -150,15 +154,25 @@ Najważniejsze zmienne:
 - `STTS_TIMEOUT` - czas nagrywania STT (sekundy), domyślnie `5`
 - `STTS_NLP2CMD_ENABLED=1` - włącza NL → komenda przez `nlp2cmd`
 - `STTS_NLP2CMD_ARGS=-r` - tryb jak w przykładach: `nlp2cmd -r "Pokaż użytkowników"`
+- `STTS_NLP2CMD_PARALLEL=1` - prewarm `nlp2cmd` w tle (mniejsze opóźnienie po STT)
 - `STTS_NLP2CMD_CONFIRM=1` - pytaj o potwierdzenie przed wykonaniem
 - `STTS_PIPER_AUTO_INSTALL=1` - auto-instalacja piper binarki (Python)
 - `STTS_PIPER_AUTO_DOWNLOAD=1` - auto-download modelu głosu piper (Python)
+- `STTS_TTS_NO_PLAY=1` - nie odtwarzaj audio (przydatne w CI/Docker)
 - `STTS_STREAM=1` - strumieniuj output komend (bez buforowania)
 - `STTS_FAST_START=1` - szybszy start (mniej detekcji sprzętu)
 - `STTS_STT_GPU_LAYERS=35` - whisper.cpp: liczba warstw na GPU (`-ngl`, wymaga build GPU)
 - `STTS_GPU_ENABLED=1` - wymuś budowę whisper.cpp z CUDA przy instalacji
 - `STTS_PIPER_RELEASE_TAG=2023.11.14-2` - wersja piper do pobrania
 - `STTS_PIPER_VOICE_VERSION=v1.0.0` - wersja głosów piper do pobrania
+- `STTS_STT_PROVIDER=...` - provider STT (np. `whisper_cpp`, `vosk`, `deepgram`)
+- `STTS_STT_MODEL=...` - model STT (np. `tiny` dla whisper.cpp, `small-pl` dla vosk)
+- `STTS_DEEPGRAM_KEY=...` - Deepgram API key (dla STT provider=deepgram)
+- `STTS_DEEPGRAM_MODEL=nova-2` - Deepgram model (dla STT provider=deepgram)
+- `STTS_WHISPER_MAX_LEN=...` - whisper.cpp: limit długości segmentów (opcjonalnie)
+- `STTS_WHISPER_WORD_THOLD=...` - whisper.cpp: próg słów (opcjonalnie)
+- `STTS_WHISPER_NO_SPEECH_THOLD=...` - whisper.cpp: próg ciszy (opcjonalnie)
+- `STTS_WHISPER_ENTROPY_THOLD=...` - whisper.cpp: próg entropii (opcjonalnie)
 
 ## NLP2CMD (Natural Language → komendy)
 
@@ -476,6 +490,8 @@ W trybie wrapper możesz użyć `{STT}` jako placeholdera, który zostanie zast�
 ```bash
 STTS_NLP2CMD_ENABLED=1 ./stts nlp2cmd -r "{STT}"
 ```
+
+`{STT_STREAM}` jest aliasem `{STT}` (MVP). Docelowo można tu podłączyć partial transcripts (live captions).
 
 ### Pipeline (jednorazowe STT → stdout, Python)
 
