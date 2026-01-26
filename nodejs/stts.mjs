@@ -71,10 +71,13 @@ const DEFAULT_CONFIG = {
     stt_provider: null,
     tts_provider: null,
     stt_model: null,
+    stt_gpu_layers: 0,
     tts_voice: 'pl',
     language: 'pl',
     timeout: 5,
     auto_tts: true,
+    stream_cmd: false,
+    fast_start: true,
 };
 
 function applyEnvOverrides(config) {
@@ -92,6 +95,10 @@ function applyEnvOverrides(config) {
         const v = String(process.env.STTS_STT_MODEL).trim();
         config.stt_model = v || null;
     }
+    if (process.env.STTS_STT_GPU_LAYERS) {
+        const n = Number(String(process.env.STTS_STT_GPU_LAYERS).trim());
+        if (Number.isFinite(n)) config.stt_gpu_layers = Math.max(0, Math.floor(n));
+    }
     if (process.env.STTS_TTS_PROVIDER) {
         let v = String(process.env.STTS_TTS_PROVIDER).trim();
         if (v === 'espeak-ng') v = 'espeak';
@@ -101,6 +108,14 @@ function applyEnvOverrides(config) {
     if (process.env.STTS_AUTO_TTS) {
         const v = String(process.env.STTS_AUTO_TTS).trim().toLowerCase();
         config.auto_tts = !['0', 'false', 'no', 'n'].includes(v);
+    }
+    if (process.env.STTS_STREAM) {
+        const v = String(process.env.STTS_STREAM).trim().toLowerCase();
+        config.stream_cmd = !['0', 'false', 'no', 'n'].includes(v);
+    }
+    if (process.env.STTS_FAST_START) {
+        const v = String(process.env.STTS_FAST_START).trim().toLowerCase();
+        config.fast_start = !['0', 'false', 'no', 'n'].includes(v);
     }
     return config;
 }
@@ -118,6 +133,177 @@ const Colors = {
 
 function cprint(color, text, newline = true) {
     process.stdout.write(`${color}${text}${Colors.NC}${newline ? '\n' : ''}`);
+}
+
+const SHELL_CORRECTIONS = {
+    'el es': 'ls',
+    'el s': 'ls',
+    'lista': 'ls',
+    'l s': 'ls',
+    'kopi': 'cp',
+    'kopiuj': 'cp',
+    'przenieś': 'mv',
+    'usuń': 'rm',
+    'katalog': 'mkdir',
+    'pokaż': 'cat',
+    'edytuj': 'nano',
+    'eko': 'echo',
+    'cd..': 'cd ..',
+    'git pusz': 'git push',
+    'git pul': 'git pull',
+    'pip instal': 'pip install',
+    'sudo apt instal': 'sudo apt install',
+};
+
+const PHONETIC_EN_CORRECTIONS = {
+    'serwer': 'server', 'servera': 'server', 'serwera': 'server', 'serwerze': 'server', 'serwery': 'servers',
+    'endżineks': 'nginx', 'endżinks': 'nginx', 'enginx': 'nginx', 'engines': 'nginx',
+    'endżin': 'engine', 'endżiny': 'engines',
+    'dokker': 'docker', 'doker': 'docker', 'dockera': 'docker', 'dokera': 'docker',
+    'kubernetis': 'kubernetes', 'kubernitis': 'kubernetes',
+    'kej eight': 'k8s', 'kej ejtis': 'k8s', 'kej ejts': 'k8s', 'kej8s': 'k8s',
+    'kubektl': 'kubectl', 'kubkontrol': 'kubectl', 'kubctl': 'kubectl',
+    'postgresem': 'postgres', 'postgresom': 'postgres', 'postgresa': 'postgres', 'postgressa': 'postgres',
+    'eskuel': 'sql', 'es kju el': 'sql', 'eskjuel': 'sql',
+    'majeskuel': 'mysql', 'majsql': 'mysql', 'mysquel': 'mysql',
+    'mongo di bi': 'mongodb', 'mongodi': 'mongodb', 'mongołdi': 'mongodb',
+    'redisa': 'redis', 'redys': 'redis',
+    'elastik': 'elastic', 'elastiksercz': 'elasticsearch',
+    'apacz': 'apache', 'apatche': 'apache', 'apacze': 'apache',
+    'nodżejejs': 'nodejs', 'noddżejs': 'nodejs', 'nodżs': 'nodejs', 'node dżejs': 'nodejs', 'nodjs': 'nodejs',
+    'piton': 'python', 'pajton': 'python', 'pajtona': 'python', 'pytona': 'python',
+    'dżawa': 'java', 'dżawy': 'java', 'dżawą': 'java',
+    'dżawaskrypt': 'javascript', 'jawa skrypt': 'javascript',
+    'dżejs': 'js', 'jst': 'js',
+    'tajpskrypt': 'typescript', 'tajp skrypt': 'typescript',
+    'reakt': 'react', 'reakta': 'react',
+    'wju': 'vue', 'wjuejs': 'vuejs',
+    'angulara': 'angular', 'angularem': 'angular',
+    'netflajs': 'nextjs', 'nekst dżejs': 'nextjs',
+    'ekspres': 'express', 'ekspresa': 'express',
+    'flaskem': 'flask',
+    'dżango': 'django', 'dżanga': 'django',
+    'larawel': 'laravel',
+    'symfonią': 'symfony',
+    'springa': 'spring', 'springbutem': 'springboot',
+    'majkroserwisy': 'microservices', 'majkroservisy': 'microservices', 'mikroserwisy': 'microservices',
+    'rest ejpi aj': 'rest api', 'restejpiaj': 'rest api',
+    'dżejson': 'json', 'jsoń': 'json',
+    'jaml': 'yaml', 'jamł': 'yaml',
+    'tomł': 'toml',
+    'deploj': 'deploy', 'deplojuj': 'deploy', 'deplojem': 'deploy',
+    'deploymenta': 'deployment', 'deploimentu': 'deployment',
+    'bilda': 'build', 'bildem': 'build', 'bilduj': 'build',
+    'starta': 'start', 'startuj': 'start',
+    'restarta': 'restart', 'restartuj': 'restart',
+    'stopa': 'stop', 'stopuj': 'stop',
+    'testa': 'test', 'testuj': 'test',
+    'lintuj': 'lint', 'lintera': 'linter',
+    'awsa': 'aws', 'awsie': 'aws', 'ejdablju es': 'aws',
+    'azura': 'azure', 'ejżur': 'azure',
+    'dżi si pi': 'gcp',
+    'wercel': 'vercel', 'wersela': 'vercel',
+    'terraforma': 'terraform', 'teraform': 'terraform',
+    'ansibla': 'ansible', 'ansiblem': 'ansible',
+    'dżenkinsem': 'jenkins', 'dżenkinsa': 'jenkins', 'jenkinsa': 'jenkins',
+    'siajaidi': 'ci/cd', 'ci cd': 'ci/cd', 'si aj si di': 'ci/cd',
+    'githuba': 'github', 'gitlaba': 'gitlab', 'gitłab': 'gitlab',
+    'bitketa': 'bitbucket', 'bitbaketa': 'bitbucket',
+    'prullrikłest': 'pull request', 'pul rekłest': 'pull request', 'pul rikłest': 'pull request',
+    'merdż': 'merge', 'merdżuj': 'merge',
+    'brenczem': 'branch', 'brancz': 'branch', 'brencza': 'branch',
+    'komitta': 'commit', 'komituj': 'commit', 'komitem': 'commit',
+    'kontejnera': 'container', 'kontejner': 'container', 'kontener': 'container', 'kontenera': 'container',
+    'imidża': 'image', 'imidż': 'image', 'imidżem': 'image',
+    'wolumena': 'volume', 'wolumen': 'volume',
+    'networkiem': 'network', 'sieć': 'network', 'sieci': 'network',
+    'serwisem': 'service', 'serwisy': 'services', 'serwis': 'service',
+    'podów': 'pods', 'pody': 'pods', 'podem': 'pod',
+    'namespacie': 'namespace', 'nejmspejs': 'namespace',
+    'helma': 'helm', 'helmem': 'helm',
+    'prometheusa': 'prometheus', 'prometeus': 'prometheus',
+    'grafaną': 'grafana', 'kibaną': 'kibana',
+    'logstashem': 'logstash', 'logstasz': 'logstash',
+    'rabit em kju': 'rabbitmq',
+    'kafką': 'kafka', 'kafki': 'kafka', 'kafkem': 'kafka',
+    'selerym': 'celery',
+};
+
+const REGEX_FIXES = [
+    [/\bel\s+es\b/gi, 'ls'],
+    [/\bel\s+s\b/gi, 'ls'],
+    [/\bl\s+s\b/gi, 'ls'],
+    [/\bgit\s+stat\b/gi, 'git status'],
+    [/\bgit\s+pusz\b/gi, 'git push'],
+    [/\bgit\s+pul\b/gi, 'git pull'],
+    [/\bgrepp?\b/gi, 'grep'],
+    [/\bsudo\s+apt\s+instal\b/gi, 'sudo apt install'],
+    [/\bpip\s+instal\b/gi, 'pip install'],
+    [/\beko\s+/gi, 'echo '],
+    [/\bkopi\s+/gi, 'cp '],
+    [/\bmkdir\s+-p\s*/gi, 'mkdir -p '],
+    [/\bservera?\s+engines?\b/gi, 'nginx server'],
+    [/\bserwera?\s+engines?\b/gi, 'nginx server'],
+    [/\bserwer\s+endżi?n?e?ks?\b/gi, 'nginx server'],
+    [/\bdocker\s+kompo[uz]e?\b/gi, 'docker compose'],
+    [/\bdocker\s+kompoza?\b/gi, 'docker compose'],
+    [/\bdokker\s+kompo[uz]e?\b/gi, 'docker compose'],
+    [/\bkube?r?netis\b/gi, 'kubernetes'],
+    [/\bkube?rnitis\b/gi, 'kubernetes'],
+];
+
+function fixPhoneticEnglish(text) {
+    const words = text.split(/\s+/);
+    const fixed = [];
+    for (const word of words) {
+        const lower = word.toLowerCase();
+        const clean = lower.replace(/^[.,!?;:"'()\[\]{}]+|[.,!?;:"'()\[\]{}]+$/g, '');
+        if (PHONETIC_EN_CORRECTIONS[clean]) {
+            let replacement = PHONETIC_EN_CORRECTIONS[clean];
+            if (word[0] && word[0] === word[0].toUpperCase()) {
+                replacement = replacement.charAt(0).toUpperCase() + replacement.slice(1);
+            }
+            fixed.push(clean !== lower ? word.replace(clean, replacement) : replacement);
+        } else {
+            fixed.push(word);
+        }
+    }
+    return fixed.join(' ');
+}
+
+function normalizeSTTText(text, language = 'pl') {
+    if (!text) return '';
+    
+    let result = text.trim();
+    
+    result = result.replace(/[.,!?;:]+$/, '');
+    
+    for (const [pattern, replacement] of REGEX_FIXES) {
+        result = result.replace(pattern, replacement);
+    }
+    
+    result = fixPhoneticEnglish(result);
+    
+    const lower = result.toLowerCase().trim();
+    for (const [wrong, correct] of Object.entries(SHELL_CORRECTIONS)) {
+        if (lower === wrong) return correct;
+    }
+    
+    return result;
+}
+
+function detectCuda() {
+    try {
+        execSync('nvcc --version', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000 });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function hasGpuBuild() {
+    const marker = join(MODELS_DIR, 'whisper.cpp', '.gpu_build');
+    return existsSync(marker);
 }
 
 function nlp2cmdTranslate(text) {
@@ -146,7 +332,7 @@ function nlp2cmdConfirm(cmd) {
     const confirm = String(process.env.STTS_NLP2CMD_CONFIRM || '1').trim().toLowerCase();
     if (['0', 'false', 'no', 'n'].includes(confirm)) return true;
     process.stdout.write(`\nNLP2CMD → ${cmd}\n`);
-    const ans = spawnSync(process.platform === 'win32' ? 'cmd' : 'bash', ['-lc', 'read -r -p "Uruchomić tę komendę? (y/n): " a; echo $a'], { encoding: 'utf8' });
+    const ans = spawnSync(process.platform === 'win32' ? 'cmd' : 'bash', ['-c', 'read -r -p "Uruchomić tę komendę? (y/n): " a; echo $a'], { encoding: 'utf8' });
     const a = String(ans.stdout || '').trim().toLowerCase();
     return a === 'y';
 }
@@ -257,7 +443,12 @@ function dumpSimpleYaml(data) {
     return keys.map((k) => `${k}: ${fmt(data[k])}`).join('\n') + '\n';
 }
 
-function detectSystem() {
+let SYSTEM_INFO_CACHE_FAST = null;
+let SYSTEM_INFO_CACHE_FULL = null;
+
+function detectSystem({ fast = false } = {}) {
+    if (fast && SYSTEM_INFO_CACHE_FAST) return SYSTEM_INFO_CACHE_FAST;
+    if (!fast && SYSTEM_INFO_CACHE_FULL) return SYSTEM_INFO_CACHE_FULL;
     const osName = platform();
     const archName = arch();
     const cpuCores = cpus().length;
@@ -265,15 +456,17 @@ function detectSystem() {
 
     let gpuName = null;
     let gpuVramGb = null;
-    try {
-        const result = execSync(
-            'nvidia-smi --query-gpu=name,memory.total --format=csv,noheader,nounits',
-            { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
-        );
-        const parts = result.trim().split(', ');
-        gpuName = parts[0];
-        gpuVramGb = parts[1] ? Math.round(parseFloat(parts[1]) / 1024 * 10) / 10 : null;
-    } catch {}
+    if (!fast) {
+        try {
+            const result = execSync(
+                'nvidia-smi --query-gpu=name,memory.total --format=csv,noheader,nounits',
+                { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
+            );
+            const parts = result.trim().split(', ');
+            gpuName = parts[0];
+            gpuVramGb = parts[1] ? Math.round(parseFloat(parts[1]) / 1024 * 10) / 10 : null;
+        } catch {}
+    }
 
     let isRpi = false;
     try {
@@ -284,16 +477,18 @@ function detectSystem() {
     } catch {}
 
     let hasMic = false;
-    try {
-        if (osName === 'linux') {
-            const result = execSync('arecord -l', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
-            hasMic = result.toLowerCase().includes('card');
-        } else {
-            hasMic = true;
-        }
-    } catch {}
+    if (!fast) {
+        try {
+            if (osName === 'linux') {
+                const result = execSync('arecord -l', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+                hasMic = result.toLowerCase().includes('card');
+            } else {
+                hasMic = true;
+            }
+        } catch {}
+    }
 
-    return {
+    const info = {
         osName,
         arch: archName,
         cpuCores,
@@ -303,6 +498,13 @@ function detectSystem() {
         isRpi,
         hasMic,
     };
+
+    if (fast) {
+        SYSTEM_INFO_CACHE_FAST = info;
+    } else {
+        SYSTEM_INFO_CACHE_FULL = info;
+    }
+    return info;
 }
 
 function printSystemInfo(info) {
@@ -416,13 +618,17 @@ const STT_PROVIDERS = {
             const whisperDir = join(MODELS_DIR, 'whisper.cpp');
             ensureDir(whisperDir);
 
+            const hasGpuBuild = () => existsSync(join(whisperDir, '.gpu_build'));
+            const detectCuda = () => !!which('nvcc');
+
             const alreadyBuilt = [
                 join(whisperDir, 'build', 'bin', 'whisper-cli'),
                 join(whisperDir, 'build', 'bin', 'main'),
                 join(whisperDir, 'main'),
             ].some((p) => existsSync(p));
             if (alreadyBuilt) {
-                cprint(Colors.GREEN, '✅ whisper.cpp already installed!');
+                const gpuInfo = hasGpuBuild() ? ' (GPU)' : ' (CPU)';
+                cprint(Colors.GREEN, `✅ whisper.cpp already installed!${gpuInfo}`);
                 return true;
             }
 
@@ -430,7 +636,24 @@ const STT_PROVIDERS = {
                 if (!existsSync(join(whisperDir, 'Makefile'))) {
                     execSync(`git clone https://github.com/ggerganov/whisper.cpp "${whisperDir}"`, { stdio: 'inherit' });
                 }
-                execSync('make -j', { cwd: whisperDir, stdio: 'inherit' });
+
+                let useCuda = detectCuda();
+                const envGpu = String(process.env.STTS_GPU_ENABLED || '').trim().toLowerCase();
+                if (['1', 'true', 'yes'].includes(envGpu)) useCuda = true;
+                else if (['0', 'false', 'no'].includes(envGpu)) useCuda = false;
+
+                if (useCuda) {
+                    cprint(Colors.GREEN, '🎮 CUDA detected - building with GPU support...');
+                    const buildDir = join(whisperDir, 'build');
+                    ensureDir(buildDir);
+                    execSync('cmake .. -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release', { cwd: buildDir, stdio: 'inherit' });
+                    execSync('cmake --build . --config Release -j', { cwd: buildDir, stdio: 'inherit' });
+                    writeFileSync(join(whisperDir, '.gpu_build'), 'cuda', 'utf8');
+                } else {
+                    cprint(Colors.YELLOW, '📦 Building CPU-only version...');
+                    execSync('make -j', { cwd: whisperDir, stdio: 'inherit' });
+                }
+
                 cprint(Colors.GREEN, '✅ whisper.cpp installed!');
                 return true;
             } catch (e) {
@@ -481,7 +704,7 @@ const STT_PROVIDERS = {
                 return null;
             }
         },
-        transcribe: async (audioPath, model, language) => {
+        transcribe: async (audioPath, model, language, gpuLayers = 0) => {
             let whisperBin = which('whisper-cpp') || which('main');
             if (!whisperBin) {
                 const candidates = [
@@ -513,8 +736,13 @@ const STT_PROVIDERS = {
             }
 
             try {
+                const cpuCount = cpus().length;
+                const threads = Math.min(cpuCount || 4, 8);
+                const ngl = Number.isFinite(Number(gpuLayers)) ? Math.max(0, Math.floor(Number(gpuLayers))) : 0;
+                const gpuBuild = existsSync(join(MODELS_DIR, 'whisper.cpp', '.gpu_build'));
+                const nglArg = ngl > 0 && gpuBuild ? ` -ngl ${ngl}` : '';
                 const result = execSync(
-                    `"${whisperBin}" -m "${modelPath}" -l ${language} -f "${audioPath}" -nt`,
+                    `"${whisperBin}" -m "${modelPath}" -l ${language} -f "${audioPath}" -nt -t ${threads}${nglArg}`,
                     { encoding: 'utf8', timeout: 120000, stdio: ['pipe', 'pipe', 'pipe'] }
                 );
                 return result.trim();
@@ -555,10 +783,108 @@ const TTS_PROVIDERS = {
             }
         },
     },
+    'spd-say': {
+        name: 'spd-say',
+        description: 'Speech Dispatcher (system TTS)',
+        minRamGb: 0.1,
+        isAvailable: () => {
+            if (which('spd-say')) return [true, 'spd-say found'];
+            return [false, 'install speech-dispatcher (spd-say)'];
+        },
+        speak: (text, voice) => {
+            const cmd = which('spd-say');
+            if (!cmd) return;
+            try {
+                spawnSync(cmd, ['-l', String(voice || 'pl'), text], { stdio: 'ignore' });
+            } catch {}
+        },
+    },
+    flite: {
+        name: 'flite',
+        description: 'Offline TTS (flite)',
+        minRamGb: 0.1,
+        isAvailable: () => {
+            if (which('flite')) return [true, 'flite found'];
+            return [false, 'install flite'];
+        },
+        speak: (text, voice) => {
+            const cmd = which('flite');
+            if (!cmd) return;
+            try {
+                const args = [];
+                if (voice) args.push('-voice', String(voice));
+                args.push('-t', text);
+                spawnSync(cmd, args, { stdio: 'ignore' });
+            } catch {}
+        },
+    },
+    say: {
+        name: 'say',
+        description: 'macOS system TTS',
+        minRamGb: 0.1,
+        isAvailable: (info) => {
+            if (info && info.osName === 'darwin' && which('say')) return [true, 'say found'];
+            return [false, 'macOS only (say)'];
+        },
+        speak: (text, voice) => {
+            const cmd = which('say');
+            if (!cmd) return;
+            try {
+                const args = [];
+                if (voice) args.push('-v', String(voice));
+                args.push(text);
+                spawnSync(cmd, args, { stdio: 'ignore' });
+            } catch {}
+        },
+    },
+    piper: {
+        name: 'piper',
+        description: 'Offline neural TTS (piper)',
+        minRamGb: 0.5,
+        isAvailable: () => {
+            if (which('piper')) return [true, 'piper found'];
+            return [false, 'install piper (binary)'];
+        },
+        speak: (text, voice, config) => {
+            const cmd = which('piper');
+            if (!cmd) return;
+            const v = String(voice || '').trim();
+            let modelPath = '';
+            if (v) {
+                if (v.endsWith('.onnx') && existsSync(v)) {
+                    modelPath = v;
+                } else {
+                    const p = join(MODELS_DIR, 'piper', `${v}.onnx`);
+                    if (existsSync(p)) modelPath = p;
+                }
+            }
+            if (!modelPath) return;
+            const outWav = join('/tmp', `stts_piper_${process.pid}_${Date.now()}.wav`);
+            try {
+                const res = spawnSync(cmd, ['--model', modelPath, '--output_file', outWav], {
+                    input: text,
+                    encoding: 'utf8',
+                    stdio: ['pipe', 'ignore', 'ignore'],
+                    timeout: 60000,
+                });
+                if (res.status !== 0) return;
+                const player = which('paplay') || which('aplay') || which('play');
+                if (!player) return;
+                if (player.endsWith('/play')) {
+                    spawnSync(player, ['-q', outWav], { stdio: 'ignore' });
+                } else {
+                    spawnSync(player, [outWav], { stdio: 'ignore' });
+                }
+            } catch {
+            } finally {
+                try { unlinkSync(outWav); } catch {}
+            }
+        },
+    },
 };
 
 function recordAudio(duration = 5, outputPath = '/tmp/stts_audio.wav') {
-    const info = detectSystem();
+    const info = detectSystem({ fast: true });
     cprint(Colors.GREEN, `🎤 Mów (${duration}s)... `, false);
 
     try {
@@ -582,7 +908,7 @@ async function question(rl, prompt) {
 
 async function interactiveSetup() {
     const config = loadConfig();
-    const info = detectSystem();
+    const info = detectSystem({ fast: false });
 
     cprint(Colors.BOLD + Colors.CYAN, `\nSTTS (nodejs) - Setup\n`);
     printSystemInfo(info);
@@ -609,14 +935,38 @@ async function interactiveSetup() {
         await stt.downloadModel(model);
     }
 
-    const tts = TTS_PROVIDERS.espeak;
-    const [ttsAvail, ttsReason] = tts.isAvailable(info);
-    console.log(`\nTTS: ${tts.name} (${ttsReason})`);
-    if (!ttsAvail) {
-        cprint(Colors.YELLOW, 'Install espeak: sudo apt install espeak');
+    console.log(`\nTTS:`);
+    const keys = Object.keys(TTS_PROVIDERS);
+    const items = keys.map((k) => {
+        const p = TTS_PROVIDERS[k];
+        let avail = false;
+        let reason = '';
+        try {
+            const res = p.isAvailable ? p.isAvailable(info) : [false, 'no check'];
+            avail = !!res[0];
+            reason = String(res[1] || '');
+        } catch {
+            avail = false;
+            reason = 'error';
+        }
+        console.log(`  ${k} (${avail ? 'OK' : reason})`);
+        return { key: k, avail, reason };
+    });
+    const ttsPick = (await question(rl, `TTS provider (ENTER=espeak): `)) || 'espeak';
+    if (!TTS_PROVIDERS[ttsPick]) {
+        cprint(Colors.YELLOW, `Unknown TTS provider: ${ttsPick}`);
         config.tts_provider = null;
     } else {
-        config.tts_provider = 'espeak';
+        const p = TTS_PROVIDERS[ttsPick];
+        const res = p.isAvailable ? p.isAvailable(info) : [false, 'not available'];
+        if (!res[0]) {
+            cprint(Colors.YELLOW, `TTS '${ttsPick}' unavailable: ${res[1]}`);
+            config.tts_provider = null;
+        } else {
+            config.tts_provider = ttsPick;
+            const v0 = config.tts_voice || 'pl';
+            config.tts_voice = (await question(rl, `TTS voice/lang (ENTER=${v0}): `)) || v0;
+        }
     }
 
     saveConfig(config);
@@ -632,7 +982,7 @@ async function speak(text, config) {
     if (!provider) return;
 
     const voice = config.tts_voice || 'pl';
-    provider.speak(text.slice(0, 200), voice);
+    provider.speak(text.slice(0, 200), voice, config);
 }
 
 async function listen(config, sttFile = null) {
@@ -657,7 +1007,7 @@ async function listen(config, sttFile = null) {
     }
 
     cprint(Colors.YELLOW, '🔄 Rozpoznawanie... ', false);
-    const text = await provider.transcribe(audioPath, config.stt_model, config.language || 'pl');
+    const text = await provider.transcribe(audioPath, config.stt_model, config.language || 'pl', config.stt_gpu_layers || 0);
 
     if (text) {
         cprint(Colors.GREEN, `✅ "${text}"`);
@@ -668,12 +1018,33 @@ async function listen(config, sttFile = null) {
     return text;
 }
 
-async function runCommand(cmd) {
+async function runCommand(cmd, { stream = false } = {}) {
+    if (stream) {
+        return await new Promise((resolve) => {
+            const argv = process.platform === 'win32' ? ['cmd', '/c', cmd] : ['bash', '-c', cmd];
+            const p = spawn(argv[0], argv.slice(1), { stdio: ['inherit', 'pipe', 'pipe'] });
+            let out = '';
+            const onData = (buf) => {
+                const s = buf.toString('utf8');
+                out += s;
+                process.stdout.write(s);
+            };
+            if (p.stdout) p.stdout.on('data', onData);
+            if (p.stderr) p.stderr.on('data', onData);
+            p.on('close', (code) => resolve({ output: out, code: code ?? 1, printed: true }));
+            p.on('error', () => resolve({ output: '', code: 1, printed: true }));
+        });
+    }
     try {
-        const out = execSync(cmd, { encoding: 'utf8', timeout: 60000, stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 10 * 1024 * 1024 });
-        return { output: out, code: 0 };
+        const out = execSync(cmd, {
+            encoding: 'utf8',
+            timeout: 60000,
+            stdio: ['pipe', 'pipe', 'pipe'],
+            maxBuffer: 10 * 1024 * 1024,
+        });
+        return { output: out, code: 0, printed: false };
     } catch (e) {
-        return { output: e.stdout || e.stderr || e.message, code: e.status || 1 };
+        return { output: e.stdout || e.stderr || e.message, code: e.status || 1, printed: false };
     }
 }
 
@@ -729,8 +1100,8 @@ async function voiceShell(config) {
             }
 
             cprint(Colors.BLUE, `▶️  ${cmd}`);
-            const { output, code } = await runCommand(cmd);
-            if (output.trim()) console.log(output);
+            const { output, code, printed } = await runCommand(cmd, { stream: !!config.stream_cmd });
+            if (!printed && output.trim()) console.log(output);
 
             const lines = output.split('\n').filter((l) => l.trim());
             if (lines.length) {
@@ -757,6 +1128,12 @@ function parseArgs(argv) {
     let sttOnly = false;
     let setup = false;
     let help = false;
+    let streamCmd = null;
+    let fastStart = null;
+    let sttGpuLayers = null;
+    let listTts = false;
+    let ttsProvider = null;
+    let ttsVoice = null;
     const rest = [];
 
     for (let i = 0; i < argv.length; i++) {
@@ -768,6 +1145,26 @@ function parseArgs(argv) {
             sttOnly = true;
         } else if (a === '--setup') {
             setup = true;
+        } else if (a === '--stream') {
+            streamCmd = true;
+        } else if (a === '--no-stream') {
+            streamCmd = false;
+        } else if (a === '--fast-start') {
+            fastStart = true;
+        } else if (a === '--full-start') {
+            fastStart = false;
+        } else if (a === '--stt-gpu-layers') {
+            const n = Number(argv[i + 1]);
+            sttGpuLayers = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+            i++;
+        } else if (a === '--list-tts') {
+            listTts = true;
+        } else if (a === '--tts-provider') {
+            ttsProvider = argv[i + 1] || '';
+            i++;
+        } else if (a === '--tts-voice') {
+            ttsVoice = argv[i + 1] || '';
+            i++;
         } else if (a === '--help' || a === '-h') {
             help = true;
         } else {
@@ -775,12 +1172,18 @@ function parseArgs(argv) {
         }
     }
 
-    return { sttFile, sttOnly, setup, help, rest };
+    return { sttFile, sttOnly, setup, help, streamCmd, fastStart, sttGpuLayers, listTts, ttsProvider, ttsVoice, rest };
 }
 
 async function main() {
     let config = loadConfig();
-    const { sttFile, sttOnly, setup, help, rest } = parseArgs(process.argv.slice(2));
+    const { sttFile, sttOnly, setup, help, streamCmd, fastStart, sttGpuLayers, listTts, ttsProvider, ttsVoice, rest } = parseArgs(process.argv.slice(2));
+
+    if (streamCmd !== null) config.stream_cmd = !!streamCmd;
+    if (fastStart !== null) config.fast_start = !!fastStart;
+    if (sttGpuLayers !== null) config.stt_gpu_layers = Number(sttGpuLayers) || 0;
+    if (ttsProvider !== null) config.tts_provider = String(ttsProvider).trim() || null;
+    if (ttsVoice !== null) config.tts_voice = String(ttsVoice).trim() || config.tts_voice;
 
     if (help) {
         console.log(`${readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(0, 14).join('\n')}\n`);
@@ -788,11 +1191,40 @@ async function main() {
         console.log('  --setup             configure STT/TTS');
         console.log('  --stt-file PATH     use WAV file instead of recording');
         console.log('  --stt-only          only transcribe (do not execute)');
+        console.log('  --stream/--no-stream  stream command output (no buffering)');
+        console.log('  --fast-start/--full-start  faster startup / full detection');
+        console.log('  --stt-gpu-layers N   whisper.cpp: offload N layers to GPU (-ngl)');
+        console.log('  --tts-provider NAME  set TTS provider (espeak/piper/spd-say/flite/say)');
+        console.log('  --tts-voice VALUE    set TTS voice/lang');
+        console.log('  --list-tts           list available TTS providers');
+        return;
+    }
+
+    if (listTts) {
+        const info = detectSystem({ fast: true });
+        for (const k of Object.keys(TTS_PROVIDERS).sort()) {
+            const p = TTS_PROVIDERS[k];
+            let ok = false;
+            let reason = '';
+            try {
+                const r = p.isAvailable ? p.isAvailable(info) : [false, 'no check'];
+                ok = !!r[0];
+                reason = String(r[1] || '');
+            } catch {
+                ok = false;
+                reason = 'error';
+            }
+            console.log(`${k}: ${ok ? 'ok' : 'no'} (${reason})`);
+        }
         return;
     }
 
     if (setup || (!config.stt_provider && !config.tts_provider && !sttFile && rest.length === 0)) {
         config = await interactiveSetup();
+    }
+
+    if (ttsProvider !== null || ttsVoice !== null || streamCmd !== null || fastStart !== null) {
+        saveConfig(config);
     }
 
     if (sttFile) {
@@ -805,8 +1237,8 @@ async function main() {
         let cmd = shellText;
         const translated = nlp2cmdTranslate(cmd);
         if (translated && nlp2cmdConfirm(translated)) cmd = translated;
-        const { output, code } = await runCommand(cmd);
-        if (output.trim()) console.log(output);
+        const { output, code, printed } = await runCommand(cmd, { stream: !!config.stream_cmd });
+        if (!printed && output.trim()) console.log(output);
         process.exit(code);
     }
 
@@ -816,8 +1248,8 @@ async function main() {
     }
 
     const cmd = rest.join(' ');
-    const { output, code } = await runCommand(cmd);
-    if (output.trim()) console.log(output);
+    const { output, code, printed } = await runCommand(cmd, { stream: !!config.stream_cmd });
+    if (!printed && output.trim()) console.log(output);
 
     const lines = output.split('\n').filter((l) => l.trim());
     if (lines.length) {

@@ -34,6 +34,21 @@ Najważniejsze zmienne:
 - `STTS_NLP2CMD_ENABLED=1` - włącza NL → komenda przez `nlp2cmd` (CLI)
 - `STTS_NLP2CMD_ARGS=-r` - tryb jak w przykładach ("Pokaż użytkowników")
 - `STTS_NLP2CMD_CONFIRM=1` - zawsze pytaj o potwierdzenie
+- `STTS_STREAM=1` - strumieniuj output komend (bez buforowania)
+- `STTS_FAST_START=1` - szybszy start (mniej detekcji sprzętu)
+- `STTS_STT_GPU_LAYERS=35` - whisper.cpp: liczba warstw na GPU (`-ngl`, wymaga build GPU)
+- `STTS_GPU_ENABLED=1` - wymuś budowę whisper.cpp z CUDA przy instalacji
+
+## Przydatne opcje CLI
+
+```bash
+./stts.mjs --stream "make build"          # output na żywo
+./stts.mjs --fast-start                   # szybszy start (domyślnie)
+./stts.mjs --full-start                   # pełna detekcja sprzętu
+./stts.mjs --list-tts                     # lista providerów TTS
+./stts.mjs --tts-provider spd-say --tts-voice pl
+./stts.mjs --stt-gpu-layers 35
+```
 
 ## NLP2CMD (Natural Language → komendy)
 

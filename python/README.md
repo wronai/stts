@@ -29,6 +29,10 @@ Najważniejsze zmienne:
 - `STTS_NLP2CMD_ENABLED=1` - włącza NL → komenda przez `nlp2cmd`
 - `STTS_TTS_VOICE` - głos TTS (np. `pl` dla espeak, `pl_PL-gosia-medium` dla piper)
 - `STTS_NLP2CMD_CONFIRM=1` - zawsze pytaj o potwierdzenie
+- `STTS_STREAM=1` - strumieniuj output komend (bez buforowania)
+- `STTS_FAST_START=1` - szybszy start (mniej detekcji sprzętu)
+- `STTS_STT_GPU_LAYERS=35` - whisper.cpp: liczba warstw na GPU (`-ngl`, wymaga build GPU)
+- `STTS_GPU_ENABLED=1` - wymuś budowę whisper.cpp z CUDA przy instalacji
 
 ## TTS: szybki setup + autodiagnostyka
 
@@ -139,6 +143,27 @@ Przykład: wygeneruj komendę i przeczytaj ją na głos (bez wykonania):
 ```bash
 ./stts --init whisper_cpp:tiny
 ./stts --init whisper_cpp:base
+```
+
+### Szybkość / interaktywność
+
+```bash
+./stts --stream "make build"          # output na żywo
+./stts --fast-start                   # szybszy start (domyślnie)
+./stts --full-start                   # pełna detekcja sprzętu
+./stts --list-tts                     # lista providerów TTS
+```
+
+### whisper.cpp + GPU (CUDA)
+
+```bash
+# build GPU podczas instalacji (setup)
+STTS_GPU_ENABLED=1 ./stts --setup
+
+# offload warstw na GPU (wymaga build GPU)
+./stts --stt-gpu-layers 35
+# lub przez env:
+STTS_STT_GPU_LAYERS=35 ./stts
 ```
 
 ### TTS w jednej linijce (bez interakcji)

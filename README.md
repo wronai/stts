@@ -50,6 +50,14 @@ użycie STT i TTS w komendzie shell:
 ./stts git commit -m "{STT}" | ./stts --tts-provider piper --tts-voice pl_PL-gosia-medium --tts-stdin
 ```
 
+```bash
+# GPU + szybki start
+STTS_GPU_ENABLED=1 STTS_FAST_START=1 ./stts
+
+# CPU-only z mniejszym modelem
+./stts --init whisper_cpp:tiny
+```
+
 Uruchamianie komend shell nawet z błędami fonetycznymi za pomocą nlp2cmd:
 ```bash
 ./stts nlp2cmd -r "{STT}" --auto-confirm | ./stts --tts-stdin
@@ -94,7 +102,7 @@ $ ls -la .
 [stts] TTS: provider=piper voice=en_US-amy-medium
 ```
 
-**Uwaga:** `./stts` wykonuje komendę z buforowaniem – output pojawi się naraz po zakończeniu. Jeśli potrzebujesz strumieniowanie (np. `git`), użyj `--dry-run | bash` lub `git commit -m "$(./stts --stt-once)"`.
+**Uwaga:** Domyślnie output komend może być buforowany (w zależności od trybu). Jeśli chcesz **zawsze widzieć output na żywo**, użyj `--stream` albo ustaw `STTS_STREAM=1`.
 
 ```bash
 ./stts git commit -m "{STT}" | ./stts --tts-stdin
@@ -145,6 +153,10 @@ Najważniejsze zmienne:
 - `STTS_NLP2CMD_CONFIRM=1` - pytaj o potwierdzenie przed wykonaniem
 - `STTS_PIPER_AUTO_INSTALL=1` - auto-instalacja piper binarki (Python)
 - `STTS_PIPER_AUTO_DOWNLOAD=1` - auto-download modelu głosu piper (Python)
+- `STTS_STREAM=1` - strumieniuj output komend (bez buforowania)
+- `STTS_FAST_START=1` - szybszy start (mniej detekcji sprzętu)
+- `STTS_STT_GPU_LAYERS=35` - whisper.cpp: liczba warstw na GPU (`-ngl`, wymaga build GPU)
+- `STTS_GPU_ENABLED=1` - wymuś budowę whisper.cpp z CUDA przy instalacji
 - `STTS_PIPER_RELEASE_TAG=2023.11.14-2` - wersja piper do pobrania
 - `STTS_PIPER_VOICE_VERSION=v1.0.0` - wersja głosów piper do pobrania
 
@@ -246,6 +258,78 @@ bash scripts/test_docker_all.sh --cache-python /tmp/stts-python-cache --cache-no
 - **Auto-pobieranie** - modele pobierane automatycznie
 - **Cross-platform** - Linux, macOS, Windows, Raspberry Pi
 - **Zero konfiguracji** - interaktywny setup przy pierwszym uruchomieniu
+- **🎮 GPU Acceleration** - automatyczna kompilacja z CUDA (NVIDIA)
+- **🔧 Text Normalization** - korekta błędów STT dla komend shell
+- **⚡ Fast Start** - szybkie uruchamianie z lazy initialization
+
+## 🎮 GPU Acceleration (CUDA)
+
+Jeśli masz kartę NVIDIA z CUDA toolkit, whisper.cpp zostanie automatycznie skompilowany z GPU:
+
+```bash
+# Auto-detect (domyślne)
+./stts --setup
+
+# Wymuś GPU
+STTS_GPU_ENABLED=1 ./stts --setup
+
+# Wymuś CPU-only
+STTS_GPU_ENABLED=0 ./stts --setup
+```
+
+Konfiguracja GPU layers (ile warstw modelu na GPU):
+
+```bash
+# Wszystkie warstwy na GPU (domyślne)
+STTS_GPU_LAYERS=99 ./stts
+
+# Tylko 20 warstw na GPU (hybrydowe)
+STTS_GPU_LAYERS=20 ./stts
+```
+
+Wymagania:
+- NVIDIA GPU z CUDA Compute Capability 5.0+
+- CUDA Toolkit (`nvcc` w PATH)
+- cmake
+
+## 🔧 Text Normalization
+
+STT może zwracać błędny tekst (literówki, źle rozpoznane komendy). `TextNormalizer` automatycznie poprawia typowe błędy:
+
+| Błąd STT | Korekta |
+|----------|---------|
+| `el es`, `l s` | `ls` |
+| `eko` | `echo` |
+| `kopi`, `kopiuj` | `cp` |
+| `git pusz` | `git push` |
+| `pip instal` | `pip install` |
+| `sudo apt instal` | `sudo apt install` |
+
+Normalizacja jest automatyczna i nie wymaga konfiguracji.
+
+## ⚡ Optymalizacja szybkości
+
+Dla maksymalnej szybkości:
+
+```bash
+# Fast start (pomija wolną detekcję sprzętu)
+STTS_FAST_START=1 ./stts
+
+# Użyj mniejszego modelu
+./stts --init whisper_cpp:tiny
+
+# GPU + optymalne wątki (auto)
+STTS_GPU_ENABLED=1 ./stts
+```
+
+Zmienne wydajnościowe:
+
+| Zmienna | Opis | Domyślnie |
+|---------|------|-----------|
+| `STTS_GPU_ENABLED` | Wymusz GPU (1) lub CPU (0) | auto |
+| `STTS_GPU_LAYERS` | Warstwy na GPU | 99 |
+| `STTS_FAST_START` | Szybki start | 1 |
+| `STTS_STREAM` | Strumieniuj output | 0 |
 
 ## 🚀 Instalacja
 
@@ -385,7 +469,7 @@ Przykład: zbuduj komendę i przeczytaj ją na głos (bez wykonania):
 Jeśli koniecznie chcesz użyć aliasu, uruchom w normalnym shellu (nie w `stts>`), ewentualnie przez:
 
 ```bash
-bash -lc './stts --dry-run git commit -m "{STT}" | TTS'
+bash -c './stts --dry-run git commit -m "{STT}" | TTS'
 ```
 
 ### Makefile Integration
@@ -439,6 +523,20 @@ bash -lc './stts --dry-run git commit -m "{STT}" | TTS'
 # Lub ręcznie:
 git clone https://github.com/ggerganov/whisper.cpp
 cd whisper.cpp && make
+```
+
+#### whisper.cpp + GPU (CUDA)
+
+Jeśli masz CUDA toolkit (`nvcc`) i chcesz przyspieszyć transkrypcję na GPU:
+
+```bash
+# podczas instalacji (setup)
+STTS_GPU_ENABLED=1 ./stts --setup
+
+# przy uruchomieniu: offload warstw na GPU
+./stts --stt-gpu-layers 35
+# albo przez env:
+STTS_STT_GPU_LAYERS=35 ./stts
 ```
 
 ### STT: faster-whisper (GPU)

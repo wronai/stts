@@ -95,10 +95,13 @@ DEFAULT_CONFIG = {
     "stt_provider": None,
     "tts_provider": None,
     "stt_model": None,
+    "stt_gpu_layers": 0,
     "tts_voice": "pl",
     "language": "pl",
     "timeout": 5,
     "auto_tts": True,
+    "stream_cmd": False,
+    "fast_start": True,
     "mic_device": None,
     "speaker_device": None,
     "audio_auto_switch": True,
@@ -131,6 +134,11 @@ def apply_env_overrides(config: dict) -> dict:
     if os.environ.get("STTS_STT_MODEL"):
         v = os.environ["STTS_STT_MODEL"].strip()
         config["stt_model"] = v or None
+    if os.environ.get("STTS_STT_GPU_LAYERS"):
+        try:
+            config["stt_gpu_layers"] = int(os.environ["STTS_STT_GPU_LAYERS"].strip())
+        except Exception:
+            pass
     if os.environ.get("STTS_TTS_VOICE"):
         config["tts_voice"] = os.environ["STTS_TTS_VOICE"].strip() or config.get("tts_voice")
     if os.environ.get("STTS_TTS_PROVIDER"):
@@ -174,6 +182,10 @@ def apply_env_overrides(config: dict) -> dict:
         config["piper_release_tag"] = os.environ["STTS_PIPER_RELEASE_TAG"].strip() or config.get("piper_release_tag")
     if os.environ.get("STTS_PIPER_VOICE_VERSION"):
         config["piper_voice_version"] = os.environ["STTS_PIPER_VOICE_VERSION"].strip() or config.get("piper_voice_version")
+    if os.environ.get("STTS_STREAM"):
+        config["stream_cmd"] = os.environ["STTS_STREAM"].strip() not in ("0", "false", "no", "n")
+    if os.environ.get("STTS_FAST_START"):
+        config["fast_start"] = os.environ["STTS_FAST_START"].strip() not in ("0", "false", "no", "n")
     return config
 
 class Colors:
@@ -212,7 +224,17 @@ class SystemInfo:
     has_mic: bool
 
 
-def detect_system() -> SystemInfo:
+_SYSTEM_INFO_CACHE_FAST: Optional[SystemInfo] = None
+_SYSTEM_INFO_CACHE_FULL: Optional[SystemInfo] = None
+
+
+def detect_system(fast: bool = False) -> SystemInfo:
+    global _SYSTEM_INFO_CACHE_FAST, _SYSTEM_INFO_CACHE_FULL
+    if fast and _SYSTEM_INFO_CACHE_FAST is not None:
+        return _SYSTEM_INFO_CACHE_FAST
+    if (not fast) and _SYSTEM_INFO_CACHE_FULL is not None:
+        return _SYSTEM_INFO_CACHE_FULL
+
     os_name = platform.system().lower()
     os_version = platform.release()
     arch = platform.machine()
@@ -232,19 +254,20 @@ def detect_system() -> SystemInfo:
 
     gpu_name = None
     gpu_vram_gb = None
-    try:
-        result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            parts = result.stdout.strip().split(", ")
-            gpu_name = parts[0]
-            gpu_vram_gb = float(parts[1]) / 1024 if len(parts) > 1 else None
-    except:
-        pass
+    if not fast:
+        try:
+            result = subprocess.run(
+                ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                parts = result.stdout.strip().split(", ")
+                gpu_name = parts[0]
+                gpu_vram_gb = float(parts[1]) / 1024 if len(parts) > 1 else None
+        except Exception:
+            pass
 
     is_rpi = False
     try:
@@ -255,16 +278,17 @@ def detect_system() -> SystemInfo:
         pass
 
     has_mic = False
-    try:
-        if os_name == "linux":
-            result = subprocess.run(["arecord", "-l"], capture_output=True, text=True)
-            has_mic = "card" in result.stdout.lower()
-        else:
-            has_mic = True
-    except:
-        pass
+    if not fast:
+        try:
+            if os_name == "linux":
+                result = subprocess.run(["arecord", "-l"], capture_output=True, text=True)
+                has_mic = "card" in result.stdout.lower()
+            else:
+                has_mic = True
+        except Exception:
+            pass
 
-    return SystemInfo(
+    info = SystemInfo(
         os_name=os_name,
         os_version=os_version,
         arch=arch,
@@ -275,6 +299,12 @@ def detect_system() -> SystemInfo:
         is_rpi=is_rpi,
         has_mic=has_mic,
     )
+
+    if fast:
+        _SYSTEM_INFO_CACHE_FAST = info
+    else:
+        _SYSTEM_INFO_CACHE_FULL = info
+    return info
 
 
 def load_config() -> dict:
@@ -719,6 +749,289 @@ def auto_detect_mic(devices: List[Tuple[str, str]], seconds: float = 0.8, rounds
     return None
 
 
+class TextNormalizer:
+    """Normalizuje i koryguje tekst z STT dla poleceń shell."""
+
+    SHELL_CORRECTIONS = {
+        "el es": "ls",
+        "el s": "ls",
+        "lista": "ls",
+        "l s": "ls",
+        "kopi": "cp",
+        "kopiuj": "cp",
+        "przenieś": "mv",
+        "usuń": "rm",
+        "katalog": "mkdir",
+        "pokaż": "cat",
+        "edytuj": "nano",
+        "eko": "echo",
+        "cd..": "cd ..",
+        "cd -": "cd -",
+        "git status": "git status",
+        "git commit": "git commit",
+        "git pusz": "git push",
+        "git pul": "git pull",
+        "pip instal": "pip install",
+        "sudo apt instal": "sudo apt install",
+    }
+
+    PHONETIC_EN_CORRECTIONS = {
+        "serwer": "server",
+        "servera": "server",
+        "serwera": "server",
+        "serwerze": "server",
+        "serwery": "servers",
+        "endżineks": "nginx",
+        "endżinks": "nginx",
+        "enginx": "nginx",
+        "engines": "nginx",
+        "endżin": "engine",
+        "endżiny": "engines",
+        "dokker": "docker",
+        "doker": "docker",
+        "dockera": "docker",
+        "dokera": "docker",
+        "kubernetis": "kubernetes",
+        "kubernitis": "kubernetes",
+        "kej eight": "k8s",
+        "kej ejtis": "k8s",
+        "kej ejts": "k8s",
+        "kej8s": "k8s",
+        "kubektl": "kubectl",
+        "kubkontrol": "kubectl",
+        "kubctl": "kubectl",
+        "postgresem": "postgres",
+        "postgresom": "postgres",
+        "postgresa": "postgres",
+        "postgressa": "postgres",
+        "eskuel": "sql",
+        "es kju el": "sql",
+        "eskjuel": "sql",
+        "majeskuel": "mysql",
+        "majsql": "mysql",
+        "mysquel": "mysql",
+        "mongo di bi": "mongodb",
+        "mongodi": "mongodb",
+        "mongołdi": "mongodb",
+        "redisa": "redis",
+        "redys": "redis",
+        "elastik": "elastic",
+        "elasticsearch": "elasticsearch",
+        "elastiksercz": "elasticsearch",
+        "apacz": "apache",
+        "apatche": "apache",
+        "apacze": "apache",
+        "nodżejejs": "nodejs",
+        "noddżejs": "nodejs",
+        "nodżs": "nodejs",
+        "node dżejs": "nodejs",
+        "nodjs": "nodejs",
+        "piton": "python",
+        "pajton": "python",
+        "pajtona": "python",
+        "pytona": "python",
+        "dżawa": "java",
+        "dżawy": "java",
+        "dżawą": "java",
+        "dżawaskrypt": "javascript",
+        "jawa skrypt": "javascript",
+        "dżejs": "js",
+        "jst": "js",
+        "tajpskrypt": "typescript",
+        "tajp skrypt": "typescript",
+        "reakt": "react",
+        "reakta": "react",
+        "wju": "vue",
+        "wjuejs": "vuejs",
+        "angulara": "angular",
+        "angularem": "angular",
+        "netflajs": "nextjs",
+        "nekst dżejs": "nextjs",
+        "nestjs": "nestjs",
+        "ekspres": "express",
+        "ekspresa": "express",
+        "flaskem": "flask",
+        "dżango": "django",
+        "dżanga": "django",
+        "laravel": "laravel",
+        "larawel": "laravel",
+        "symfonią": "symfony",
+        "springa": "spring",
+        "springbutem": "springboot",
+        "majkroserwisy": "microservices",
+        "majkroservisy": "microservices",
+        "mikroserwisy": "microservices",
+        "rest ejpi aj": "rest api",
+        "rest api": "rest api",
+        "restejpiaj": "rest api",
+        "dżejson": "json",
+        "jsoń": "json",
+        "jaml": "yaml",
+        "jamł": "yaml",
+        "tomł": "toml",
+        "toml": "toml",
+        "iniajalizuj": "initialize",
+        "initializuj": "initialize",
+        "inital": "init",
+        "inituj": "init",
+        "deploj": "deploy",
+        "deplojuj": "deploy",
+        "deplojem": "deploy",
+        "deploymenta": "deployment",
+        "deploimentu": "deployment",
+        "bilda": "build",
+        "bildem": "build",
+        "bilduj": "build",
+        "starta": "start",
+        "startuj": "start",
+        "restarta": "restart",
+        "restartuj": "restart",
+        "stopa": "stop",
+        "stopuj": "stop",
+        "testa": "test",
+        "testuj": "test",
+        "lintuj": "lint",
+        "lintera": "linter",
+        "awsa": "aws",
+        "awsie": "aws",
+        "ejdablju es": "aws",
+        "azura": "azure",
+        "ejżur": "azure",
+        "dżi si pi": "gcp",
+        "google cloud": "gcp",
+        "heroku": "heroku",
+        "netlify": "netlify",
+        "wercel": "vercel",
+        "wersela": "vercel",
+        "terraforma": "terraform",
+        "teraform": "terraform",
+        "ansibla": "ansible",
+        "ansiblem": "ansible",
+        "dżenkinsem": "jenkins",
+        "dżenkinsa": "jenkins",
+        "jenkinsa": "jenkins",
+        "siajaidi": "ci/cd",
+        "ci cd": "ci/cd",
+        "si aj si di": "ci/cd",
+        "githuba": "github",
+        "gitlaba": "gitlab",
+        "gitłab": "gitlab",
+        "bitketa": "bitbucket",
+        "bitbaketa": "bitbucket",
+        "prullrikłest": "pull request",
+        "pul rekłest": "pull request",
+        "pul rikłest": "pull request",
+        "merdż": "merge",
+        "merdżuj": "merge",
+        "brenczem": "branch",
+        "brancz": "branch",
+        "brencza": "branch",
+        "komitta": "commit",
+        "komituj": "commit",
+        "komitem": "commit",
+        "kontejnera": "container",
+        "kontejner": "container",
+        "kontener": "container",
+        "kontenera": "container",
+        "imidża": "image",
+        "imidż": "image",
+        "imidżem": "image",
+        "wolumena": "volume",
+        "wolumen": "volume",
+        "networkiem": "network",
+        "sieć": "network",
+        "sieci": "network",
+        "serwisem": "service",
+        "serwisy": "services",
+        "serwis": "service",
+        "podów": "pods",
+        "pody": "pods",
+        "podem": "pod",
+        "namespacie": "namespace",
+        "nejmspejs": "namespace",
+        "helma": "helm",
+        "helmem": "helm",
+        "istio": "istio",
+        "prometheusa": "prometheus",
+        "prometeus": "prometheus",
+        "grafaną": "grafana",
+        "grafana": "grafana",
+        "kibaną": "kibana",
+        "kibana": "kibana",
+        "logstashem": "logstash",
+        "logstasz": "logstash",
+        "rabbitmq": "rabbitmq",
+        "rabit em kju": "rabbitmq",
+        "kafką": "kafka",
+        "kafki": "kafka",
+        "kafkem": "kafka",
+        "celery": "celery",
+        "selerym": "celery",
+    }
+
+    REGEX_FIXES = [
+        (r"\bel\s+es\b", "ls"),
+        (r"\bel\s+s\b", "ls"),
+        (r"\bl\s+s\b", "ls"),
+        (r"\bgit\s+stat\b", "git status"),
+        (r"\bgit\s+pusz\b", "git push"),
+        (r"\bgit\s+pul\b", "git pull"),
+        (r"\bgrepp?\b", "grep"),
+        (r"\bsudo\s+apt\s+instal\b", "sudo apt install"),
+        (r"\bpip\s+instal\b", "pip install"),
+        (r"\beko\s+", "echo "),
+        (r"\bkopi\s+", "cp "),
+        (r"\bmkdir\s+-p\s*", "mkdir -p "),
+        (r"\bservera?\s+engines?\b", "nginx server"),
+        (r"\bserwera?\s+engines?\b", "nginx server"),
+        (r"\bserwer\s+endżi?n?e?ks?\b", "nginx server"),
+        (r"\bdocker\s+kompo[uz]e?\b", "docker compose"),
+        (r"\bdocker\s+kompoza?\b", "docker compose"),
+        (r"\bdokker\s+kompo[uz]e?\b", "docker compose"),
+        (r"\bkube?r?netis\b", "kubernetes"),
+        (r"\bkube?rnitis\b", "kubernetes"),
+    ]
+
+    @classmethod
+    def normalize(cls, text: str, language: str = "pl") -> str:
+        """Normalizuje tekst STT - usuwa błędy, poprawia komendy."""
+        if not text:
+            return ""
+
+        result = text.strip()
+
+        result = re.sub(r"[.,!?;:]+$", "", result)
+
+        for pattern, replacement in cls.REGEX_FIXES:
+            result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
+
+        result = cls._fix_phonetic_english(result)
+
+        lower = result.lower().strip()
+        for wrong, correct in cls.SHELL_CORRECTIONS.items():
+            if lower == wrong:
+                return correct
+
+        return result
+
+    @classmethod
+    def _fix_phonetic_english(cls, text: str) -> str:
+        """Poprawia angielskie słowa techniczne zapisane fonetycznie po polsku."""
+        words = text.split()
+        fixed = []
+        for word in words:
+            lower = word.lower()
+            clean = lower.strip('.,!?;:"\'()[]{}')
+            if clean in cls.PHONETIC_EN_CORRECTIONS:
+                replacement = cls.PHONETIC_EN_CORRECTIONS[clean]
+                if word[0].isupper():
+                    replacement = replacement.capitalize()
+                fixed.append(word.replace(clean, replacement, 1) if clean != lower else replacement)
+            else:
+                fixed.append(word)
+        return " ".join(fixed)
+
+
 class STTProvider:
     name: str = "base"
     description: str = "Base"
@@ -737,9 +1050,17 @@ class STTProvider:
     def get_recommended_model(cls, info: SystemInfo) -> Optional[str]:
         return None
 
-    def __init__(self, model: Optional[str] = None, language: str = "pl"):
+    def __init__(
+        self,
+        model: Optional[str] = None,
+        language: str = "pl",
+        config: Optional[dict] = None,
+        info: Optional[SystemInfo] = None,
+    ):
         self.model = model
         self.language = language
+        self.config = config or {}
+        self.info = info
 
     def transcribe(self, audio_path: str) -> str:
         raise NotImplementedError
@@ -787,7 +1108,25 @@ class WhisperCppSTT(STTProvider):
         return "large"
 
     @classmethod
-    def install(cls, info: SystemInfo) -> bool:
+    def _detect_cuda(cls) -> bool:
+        """Sprawdź czy CUDA toolkit jest dostępny."""
+        try:
+            result = subprocess.run(
+                ["nvcc", "--version"],
+                capture_output=True, text=True, timeout=5
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    @classmethod
+    def _has_gpu_build(cls) -> bool:
+        """Sprawdź czy whisper.cpp zbudowano z GPU."""
+        marker = MODELS_DIR / "whisper.cpp" / ".gpu_build"
+        return marker.exists()
+
+    @classmethod
+    def install(cls, info: SystemInfo, force_gpu: Optional[bool] = None) -> bool:
         cprint(Colors.YELLOW, "📦 Installing whisper.cpp...")
         whisper_dir = MODELS_DIR / "whisper.cpp"
         whisper_dir.mkdir(parents=True, exist_ok=True)
@@ -801,15 +1140,41 @@ class WhisperCppSTT(STTProvider):
             )
         )
         if already_built:
-            cprint(Colors.GREEN, "✅ whisper.cpp already installed!")
+            gpu_info = " (GPU)" if cls._has_gpu_build() else " (CPU)"
+            cprint(Colors.GREEN, f"✅ whisper.cpp already installed!{gpu_info}")
             return True
+
         try:
             if not (whisper_dir / "Makefile").exists():
                 subprocess.run(
                     ["git", "clone", "https://github.com/ggerganov/whisper.cpp", str(whisper_dir)],
                     check=True,
                 )
-            subprocess.run(["make", "-j"], cwd=whisper_dir, check=True)
+
+            use_cuda = force_gpu if force_gpu is not None else cls._detect_cuda()
+            env_gpu = os.environ.get("STTS_GPU_ENABLED", "").strip().lower()
+            if env_gpu in ("1", "true", "yes"):
+                use_cuda = True
+            elif env_gpu in ("0", "false", "no"):
+                use_cuda = False
+
+            if use_cuda:
+                cprint(Colors.GREEN, "🎮 CUDA detected - building with GPU support...")
+                build_dir = whisper_dir / "build"
+                build_dir.mkdir(exist_ok=True)
+                subprocess.run(
+                    ["cmake", "..", "-DGGML_CUDA=ON", "-DCMAKE_BUILD_TYPE=Release"],
+                    cwd=build_dir, check=True
+                )
+                subprocess.run(
+                    ["cmake", "--build", ".", "--config", "Release", "-j"],
+                    cwd=build_dir, check=True
+                )
+                (whisper_dir / ".gpu_build").write_text("cuda")
+            else:
+                cprint(Colors.YELLOW, "📦 Building CPU-only version...")
+                subprocess.run(["make", "-j"], cwd=whisper_dir, check=True)
+
             cprint(Colors.GREEN, "✅ whisper.cpp installed!")
             return True
         except Exception as e:
@@ -880,13 +1245,37 @@ class WhisperCppSTT(STTProvider):
             return ""
 
         try:
+            cmd = [whisper_bin, "-m", str(model_path), "-l", self.language, "-f", audio_path, "-nt"]
+            cmd.extend(["-t", str(min(os.cpu_count() or 4, 8))])
+
+            gpu_layers = 0
+            try:
+                gpu_layers = int(self.config.get("stt_gpu_layers", 0) or 0)
+            except Exception:
+                gpu_layers = 0
+            if gpu_layers <= 0:
+                try:
+                    gpu_layers = int(os.environ.get("STTS_STT_GPU_LAYERS", "0").strip() or "0")
+                except Exception:
+                    gpu_layers = 0
+            if gpu_layers <= 0:
+                # Backward compatibility
+                try:
+                    gpu_layers = int(os.environ.get("STTS_GPU_LAYERS", "0").strip() or "0")
+                except Exception:
+                    gpu_layers = 0
+
+            if gpu_layers > 0 and self._has_gpu_build():
+                cmd.extend(["-ngl", str(gpu_layers)])
+
             result = subprocess.run(
-                [whisper_bin, "-m", str(model_path), "-l", self.language, "-f", audio_path, "-nt"],
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=120,
             )
-            return result.stdout.strip()
+            raw_text = result.stdout.strip()
+            return TextNormalizer.normalize(raw_text, self.language)
         except Exception as e:
             cprint(Colors.RED, f"❌ Transcription error: {e}")
             return ""
@@ -903,8 +1292,10 @@ class TTSProvider:
     def install(cls, info: SystemInfo) -> bool:
         return False
 
-    def __init__(self, voice: str = "pl"):
+    def __init__(self, voice: str = "pl", config: Optional[dict] = None, info: Optional[SystemInfo] = None):
         self.voice = voice
+        self.config = config or {}
+        self.info = info
 
     def speak(self, text: str) -> None:
         raise NotImplementedError
@@ -1099,7 +1490,22 @@ class PiperTTS(TTSProvider):
 
     def speak(self, text: str) -> None:
         piper = PiperTTS.find_piper_bin()
+        if not piper and self.config.get("piper_auto_install", True):
+            try:
+                info = self.info or detect_system(fast=True)
+                PiperTTS.install_local(info, self.config.get("piper_release_tag", "2023.11.14-2"))
+                piper = PiperTTS.find_piper_bin()
+            except Exception:
+                piper = PiperTTS.find_piper_bin()
+
         model = self._resolve_model()
+        if not model and self.config.get("piper_auto_download", True):
+            try:
+                PiperTTS.download_voice(self.voice, self.config.get("piper_voice_version", "v1.0.0"))
+            except Exception:
+                pass
+            model = self._resolve_model()
+
         if not piper:
             cprint(Colors.YELLOW, "⚠️  Brak binarki piper w PATH")
             return
@@ -1124,8 +1530,73 @@ class PiperTTS(TTSProvider):
             return
 
 
+class SpdSayTTS(TTSProvider):
+    name = "spd-say"
+
+    @classmethod
+    def is_available(cls, info: SystemInfo):
+        if shutil.which("spd-say"):
+            return True, "spd-say found"
+        return False, "install speech-dispatcher (spd-say)"
+
+    def speak(self, text: str) -> None:
+        cmd = shutil.which("spd-say")
+        if not cmd:
+            return
+        try:
+            subprocess.run([cmd, "-l", str(self.voice), text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            return
+
+
+class SayTTS(TTSProvider):
+    name = "say"
+
+    @classmethod
+    def is_available(cls, info: SystemInfo):
+        if info.os_name == "darwin" and shutil.which("say"):
+            return True, "say found"
+        return False, "macOS only (say)"
+
+    def speak(self, text: str) -> None:
+        cmd = shutil.which("say")
+        if not cmd:
+            return
+        try:
+            args = [cmd]
+            if self.voice:
+                args += ["-v", str(self.voice)]
+            args.append(text)
+            subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            return
+
+
+class FliteTTS(TTSProvider):
+    name = "flite"
+
+    @classmethod
+    def is_available(cls, info: SystemInfo):
+        if shutil.which("flite"):
+            return True, "flite found"
+        return False, "install flite"
+
+    def speak(self, text: str) -> None:
+        cmd = shutil.which("flite")
+        if not cmd:
+            return
+        try:
+            args = [cmd]
+            if self.voice:
+                args += ["-voice", str(self.voice)]
+            args += ["-t", text]
+            subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            return
+
+
 STT_PROVIDERS = {"whisper_cpp": WhisperCppSTT}
-TTS_PROVIDERS = {"espeak": EspeakTTS, "piper": PiperTTS}
+TTS_PROVIDERS = {"espeak": EspeakTTS, "piper": PiperTTS, "spd-say": SpdSayTTS, "say": SayTTS, "flite": FliteTTS}
 
 
 def _ts() -> str:
@@ -1293,27 +1764,51 @@ def interactive_setup() -> dict:
     if input(f"Download model {model} now? (y/n): ").strip().lower() == "y":
         stt_cls.download_model(model)
 
-    es_ok, es_reason = EspeakTTS.is_available(info)
-    pi_ok, pi_reason = PiperTTS.is_available(info)
-    print("TTS:")
-    print(f"  1) espeak ({'OK' if es_ok else es_reason})")
-    print(f"  2) piper  ({'OK' if pi_ok else pi_reason})")
-    tts_sel = input("Wybierz TTS [1/2] (ENTER=1): ").strip() or "1"
+    tts_choices: List[Tuple[str, TTSProvider]] = []
+    for key, cls in (
+        ("espeak", EspeakTTS),
+        ("piper", PiperTTS),
+        ("spd-say", SpdSayTTS),
+        ("flite", FliteTTS),
+        ("say", SayTTS),
+    ):
+        try:
+            ok, reason = cls.is_available(info)
+        except Exception:
+            ok, reason = False, "error"
+        tts_choices.append((key, cls))
+        state = "OK" if ok else reason
+        print(f"  {len(tts_choices)}) {key} ({state})")
 
-    if tts_sel == "2":
+    tts_sel = input(f"Wybierz TTS [1-{len(tts_choices)}] (ENTER=1): ").strip() or "1"
+    try:
+        idx = int(tts_sel)
+    except Exception:
+        idx = 1
+    if idx < 1 or idx > len(tts_choices):
+        idx = 1
+
+    tts_key, tts_cls = tts_choices[idx - 1]
+    ok, reason = tts_cls.is_available(info)
+
+    if tts_key == "piper":
         config["tts_provider"] = "piper"
         config["tts_voice"] = input("Piper voice id (ENTER=pl_PL-gosia-medium): ").strip() or "pl_PL-gosia-medium"
         if not PiperTTS.find_piper_bin():
             if input("Pobrać i zainstalować piper binarkę (local)? (y/n): ").strip().lower() == "y":
                 PiperTTS.install_local(info, config.get("piper_release_tag", "2023.11.14-2"))
-        inst = PiperTTS(voice=config.get("tts_voice", ""))
+        inst = PiperTTS(voice=config.get("tts_voice", ""), config=config, info=info)
         if not inst._resolve_model():
             if input("Pobrać model piper dla tego głosu? (y/n): ").strip().lower() == "y":
                 PiperTTS.download_voice(config.get("tts_voice", ""), config.get("piper_voice_version", "v1.0.0"))
     else:
-        config["tts_provider"] = "espeak" if es_ok else None
-        if not es_ok:
-            cprint(Colors.YELLOW, "Install espeak: sudo apt install espeak")
+        if ok:
+            config["tts_provider"] = tts_key
+            v0 = config.get("tts_voice", "pl")
+            config["tts_voice"] = input(f"TTS voice/lang (ENTER={v0}): ").strip() or v0
+        else:
+            config["tts_provider"] = None
+            cprint(Colors.YELLOW, f"TTS '{tts_key}' niedostępny: {reason}")
 
     if info.os_name == "linux":
         src, sink = get_active_pulse_devices()
@@ -1453,7 +1948,7 @@ def _has_pexpect() -> bool:
 class VoiceShell:
     def __init__(self, config: dict):
         self.config = config
-        self.info = detect_system()
+        self.info = detect_system(fast=bool(self.config.get("fast_start", True)))
         self.stt = self._init_stt()
         self.tts = self._init_tts()
 
@@ -1468,35 +1963,26 @@ class VoiceShell:
             cls = STT_PROVIDERS[provider]
             available, _ = cls.is_available(self.info)
             if available:
-                return cls(model=self.config.get("stt_model"), language=self.config.get("language", "pl"))
+                return cls(
+                    model=self.config.get("stt_model"),
+                    language=self.config.get("language", "pl"),
+                    config=self.config,
+                    info=self.info,
+                )
         return None
 
     def _init_tts(self) -> Optional[TTSProvider]:
         provider = self.config.get("tts_provider")
         voice = self.config.get("tts_voice", "pl")
 
-        if provider == "piper" and self.config.get("piper_auto_install", True) and not PiperTTS.find_piper_bin():
-            try:
-                PiperTTS.install_local(self.info, self.config.get("piper_release_tag", "2023.11.14-2"))
-            except Exception:
-                pass
-
         if provider in TTS_PROVIDERS:
             cls = TTS_PROVIDERS[provider]
+            inst = cls(voice=voice, config=self.config, info=self.info)
             available, reason = cls.is_available(self.info)
             if available:
-                inst = cls(voice=voice)
-                if provider == "piper":
-                    try:
-                        if not getattr(inst, "_resolve_model")():
-                            if self.config.get("piper_auto_download", True):
-                                PiperTTS.download_voice(voice, self.config.get("piper_voice_version", "v1.0.0"))
-                            if not getattr(inst, "_resolve_model")():
-                                available, reason = False, "piper model not found"
-                    except Exception:
-                        available, reason = False, "piper model not found"
-                if available:
-                    return inst
+                return inst
+            if provider == "piper" and self.config.get("piper_auto_install", True):
+                return inst
 
             # Explicit provider selected but not usable: be strict and disable TTS (avoid silent fallback).
             print(f"[stts] ⚠️  TTS provider '{provider}' unavailable ({reason}); TTS disabled", file=sys.stderr)
@@ -1504,7 +1990,7 @@ class VoiceShell:
 
         # No explicit provider selected: best-effort fallback
         if shutil.which("espeak") or shutil.which("espeak-ng"):
-            return EspeakTTS(voice)
+            return EspeakTTS(voice=voice, config=self.config, info=self.info)
         return None
 
     def speak(self, text: str):
@@ -1587,16 +2073,22 @@ class VoiceShell:
 
     def run_command_streaming(self, cmd: str):
         """Strumieniowe wykonanie komendy z wypisywaniem linia po linii."""
-        import shlex
         try:
-            # Użyj Popen z stdout=PIPE do strumieniowania
+            if isinstance(cmd, list):
+                argv = cmd
+            else:
+                if os.name != "nt":
+                    argv = ["/bin/bash", "-c", cmd]
+                else:
+                    argv = ["cmd", "/c", cmd]
+
             process = subprocess.Popen(
-                cmd if isinstance(cmd, list) else shlex.split(cmd),
+                argv,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                bufsize=1,  # line buffering
-                universal_newlines=True
+                bufsize=1,
+                universal_newlines=True,
             )
             output_parts = []
             for line in iter(process.stdout.readline, ''):
@@ -1619,7 +2111,10 @@ class VoiceShell:
         # W pipe (nie-TTY) użyj strumieniowania
         if not sys.stdin.isatty():
             out, code = self.run_command_streaming(cmd)
-            return out, code, False
+            return out, code, True
+        if self.config.get("stream_cmd", False):
+            out, code = self.run_command_streaming(cmd)
+            return out, code, True
         out, code = self.run_command(cmd)
         return out, code, False
 
@@ -1627,7 +2122,7 @@ class VoiceShell:
         import pexpect
 
         if os.name != "nt":
-            child = pexpect.spawn("/bin/bash", ["-lc", cmd], encoding="utf-8", timeout=1)
+            child = pexpect.spawn("/bin/bash", ["-c", cmd], encoding="utf-8", timeout=1)
         else:
             child = pexpect.spawn(cmd, encoding="utf-8", timeout=1)
         output_parts: List[str] = []
@@ -1795,6 +2290,10 @@ def parse_args(argv: List[str]):
     help_ = False
     dry_run = False
     safe_mode = False
+    stream_cmd = None
+    fast_start = None
+    stt_gpu_layers = None
+    list_tts = False
     rest: List[str] = []
 
     it = iter(argv)
@@ -1826,11 +2325,26 @@ def parse_args(argv: List[str]):
             dry_run = True
         elif a == "--safe-mode":
             safe_mode = True
+        elif a == "--stream":
+            stream_cmd = True
+        elif a == "--no-stream":
+            stream_cmd = False
+        elif a == "--fast-start":
+            fast_start = True
+        elif a == "--full-start":
+            fast_start = False
+        elif a == "--stt-gpu-layers":
+            try:
+                stt_gpu_layers = int((next(it, None) or "0").strip())
+            except Exception:
+                stt_gpu_layers = 0
+        elif a == "--list-tts":
+            list_tts = True
         elif a in ("--help", "-h"):
             help_ = True
         else:
             rest.append(a)
-    return stt_file, stt_only, stt_once, setup, init, tts_provider, tts_voice, tts_stdin, tts_test, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, rest
+    return stt_file, stt_only, stt_once, setup, init, tts_provider, tts_voice, tts_stdin, tts_test, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, list_tts, rest
 
 
 def tts_test(shell: "VoiceShell", text: str) -> int:
@@ -1980,29 +2494,55 @@ def tts_from_stdin(shell: "VoiceShell") -> int:
 
 def main():
     config = load_config()
-    stt_file, stt_only, stt_once, setup, init, tts_provider, tts_voice, tts_stdin, tts_test_flag, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, rest = parse_args(sys.argv[1:])
+    stt_file, stt_only, stt_once, setup, init, tts_provider, tts_voice, tts_stdin, tts_test_flag, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, list_tts, rest = parse_args(sys.argv[1:])
 
     # CLI --safe-mode overrides config
     if safe_mode:
         config["safe_mode"] = True
+
+    if stream_cmd is not None:
+        config["stream_cmd"] = bool(stream_cmd)
+    if fast_start is not None:
+        config["fast_start"] = bool(fast_start)
+    if stt_gpu_layers is not None:
+        config["stt_gpu_layers"] = int(stt_gpu_layers)
 
     if help_:
         print(__doc__)
         print("\nOpcje bezpieczeństwa:")
         print("  --dry-run      Pokaż komendę bez wykonania")
         print("  --safe-mode    Zawsze pytaj przed wykonaniem")
+        print("\nSzybkość / interaktywność:")
+        print("  --stream / --no-stream     Strumieniuj output komendy (bez buforowania)")
+        print("  --fast-start / --full-start Szybszy start (mniej detekcji sprzętu)")
+        print("\nGPU (STT / whisper.cpp):")
+        print("  --stt-gpu-layers N         Liczba warstw na GPU (-ngl), wymaga build GPU")
+        print("  --list-tts                 Lista dostępnych providerów TTS")
         print("\nTryby pipeline:")
         print("  --tts-stdin    Czytaj stdin i przeczytaj na głos ostatnią niepustą linię")
         print("  --tts-test [TEXT]  Zrób test TTS i zakończ")
         print("\nAutomatyczne TTS (piper):")
         print("  --install-piper        Pobierz piper binarkę do ~/.config/stts-python/bin")
-        print("  --download-piper-voice VOICE_ID  Pobierz model i config do ~/.config/stts-python/models/piper")
+        print("  --download-piper-voice VOICE  Pobierz piper voice do ~/.config/stts-python/models/piper/")
         print("\nZmienne środowiskowe:")
         print("  STTS_SAFE_MODE=1       Włącz tryb bezpieczny")
         print("  STTS_VAD_ENABLED=1     Włącz VAD auto-stop (domyślnie)")
         print("  STTS_VAD_SILENCE_MS=800  Czas ciszy do zatrzymania (ms)")
+        print("  STTS_STREAM=1          Domyślnie strumieniuj output komend")
+        print("  STTS_FAST_START=1      Domyślnie szybki start (mniej detekcji)")
+        print("  STTS_STT_GPU_LAYERS=35  whisper.cpp: liczba warstw na GPU (-ngl)")
         print("  STTS_PIPER_AUTO_INSTALL=1  Auto-install piper binarki (local)")
         print("  STTS_PIPER_AUTO_DOWNLOAD=1 Auto-download modelu piper dla tts_voice")
+        return 0
+
+    if list_tts:
+        info = detect_system(fast=True)
+        for k, cls in sorted(TTS_PROVIDERS.items(), key=lambda kv: kv[0]):
+            try:
+                ok, reason = cls.is_available(info)
+            except Exception:
+                ok, reason = False, "error"
+            print(f"{k}: {'ok' if ok else 'no'} ({reason})")
         return 0
 
     if tts_provider is not None or tts_voice is not None:
@@ -2054,8 +2594,8 @@ def main():
             translated = nlp2cmd_translate(text)
             if translated and nlp2cmd_confirm(translated):
                 text = translated
-            out, code, interactive = shell.run_command_any(text)
-            if out.strip():
+            out, code, printed = shell.run_command_any(text)
+            if out.strip() and not printed:
                 print(out, end="", flush=True)
             return code
         return 1
@@ -2090,8 +2630,8 @@ def main():
     if not ok:
         return 0 if reason == "dry-run" else 1
 
-    out, code, interactive = shell.run_command_any(cmd)
-    if out.strip():
+    out, code, printed = shell.run_command_any(cmd)
+    if out.strip() and not printed:
         print(out, end="", flush=True)
     lines = [l.strip() for l in out.splitlines() if l.strip()]
     if lines and shell.tts and config.get("auto_tts", True):
