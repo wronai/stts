@@ -41,7 +41,7 @@ import difflib
 import functools
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict, Any
 
 
 def load_dotenv() -> None:
@@ -2524,8 +2524,285 @@ class FliteTTS(TTSProvider):
             return
 
 
-STT_PROVIDERS = {"whisper_cpp": WhisperCppSTT, "deepgram": DeepgramSTT, "vosk": VoskSTT}
-TTS_PROVIDERS = {"espeak": EspeakTTS, "piper": PiperTTS, "spd-say": SpdSayTTS, "say": SayTTS, "flite": FliteTTS}
+class CoquiSTT(STTProvider):
+    """Coqui STT - lightweight, CPU-friendly, good for Polish accents."""
+    name = "coqui"
+    description = "Offline, lightweight STT (Coqui/DeepSpeech)"
+    min_ram_gb = 0.5
+
+    @classmethod
+    def is_available(cls, info: SystemInfo):
+        try:
+            from stt import Model
+            return True, "coqui-stt installed"
+        except ImportError:
+            return False, "pip install coqui-stt"
+
+    @classmethod
+    def get_recommended_model(cls, info: SystemInfo) -> Optional[str]:
+        return "model.tflite"
+
+    def transcribe(self, audio_path: str) -> str:
+        try:
+            from stt import Model
+        except ImportError:
+            cprint(Colors.RED, "❌ coqui-stt not installed: pip install coqui-stt")
+            return ""
+
+        model_path = self.model or str(MODELS_DIR / "coqui" / "model.tflite")
+        if not Path(model_path).exists():
+            cprint(Colors.RED, f"❌ Coqui model not found: {model_path}")
+            return ""
+
+        try:
+            import wave
+            model = Model(model_path)
+
+            wf = wave.open(audio_path, "rb")
+            audio = wf.readframes(wf.getnframes())
+            wf.close()
+
+            text = model.stt(audio)
+            return TextNormalizer.normalize(text or "", self.language)
+        except Exception as e:
+            cprint(Colors.RED, f"❌ Coqui STT error: {e}")
+            return ""
+
+
+class PicovoiceSTT(STTProvider):
+    """Picovoice Leopard - ultra-lightweight STT for embedded."""
+    name = "picovoice"
+    description = "Offline, ultra-light STT (~5MB, Pi Zero compatible)"
+    min_ram_gb = 0.1
+
+    @classmethod
+    def is_available(cls, info: SystemInfo):
+        try:
+            import pvleopard
+            return True, "pvleopard installed"
+        except ImportError:
+            return False, "pip install pvleopard"
+
+    @classmethod
+    def get_recommended_model(cls, info: SystemInfo) -> Optional[str]:
+        return None
+
+    def transcribe(self, audio_path: str) -> str:
+        try:
+            import pvleopard
+        except ImportError:
+            cprint(Colors.RED, "❌ pvleopard not installed: pip install pvleopard")
+            return ""
+
+        access_key = os.environ.get("PICOVOICE_ACCESS_KEY", "").strip()
+        if not access_key:
+            cprint(Colors.RED, "❌ PICOVOICE_ACCESS_KEY not set")
+            return ""
+
+        try:
+            leopard = pvleopard.create(access_key=access_key)
+            transcript, _ = leopard.process_file(audio_path)
+            leopard.delete()
+            return TextNormalizer.normalize(transcript or "", self.language)
+        except Exception as e:
+            cprint(Colors.RED, f"❌ Picovoice STT error: {e}")
+            return ""
+
+
+class CoquiTTS(TTSProvider):
+    """Coqui TTS - neural TTS, XTTS-v2 multilingual."""
+    name = "coqui-tts"
+
+    @classmethod
+    def is_available(cls, info: SystemInfo):
+        try:
+            from TTS.api import TTS
+            return True, "coqui-tts installed"
+        except ImportError:
+            return False, "pip install TTS"
+
+    def speak(self, text: str) -> None:
+        try:
+            from TTS.api import TTS
+        except ImportError:
+            cprint(Colors.YELLOW, "⚠️ coqui-tts not installed: pip install TTS")
+            return
+
+        no_play = os.environ.get("STTS_TTS_NO_PLAY", "").strip().lower() in ("1", "true", "yes", "y")
+
+        try:
+            model_name = self.config.get("coqui_tts_model") or os.environ.get("STTS_COQUI_TTS_MODEL", "tts_models/multilingual/multi-dataset/xtts_v2")
+            tts = TTS(model_name)
+
+            with tempfile.NamedTemporaryFile(prefix="stts_coqui_", suffix=".wav", delete=False) as f:
+                out_path = f.name
+
+            tts.tts_to_file(text=text, file_path=out_path, language=self.voice or "pl")
+
+            if not no_play:
+                play_audio(out_path)
+
+            try:
+                Path(out_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+        except Exception as e:
+            cprint(Colors.YELLOW, f"⚠️ Coqui TTS error: {e}")
+
+
+class FestivalTTS(TTSProvider):
+    """Festival TTS - classic, ultra-lightweight."""
+    name = "festival"
+
+    @classmethod
+    def is_available(cls, info: SystemInfo):
+        if shutil.which("text2wave") and shutil.which("aplay"):
+            return True, "festival found"
+        if shutil.which("festival"):
+            return True, "festival found"
+        return False, "apt install festival festvox-kallpc16k"
+
+    def speak(self, text: str) -> None:
+        no_play = os.environ.get("STTS_TTS_NO_PLAY", "").strip().lower() in ("1", "true", "yes", "y")
+
+        try:
+            with tempfile.NamedTemporaryFile(prefix="stts_festival_", suffix=".wav", delete=False) as f:
+                out_path = f.name
+
+            # Use text2wave if available
+            if shutil.which("text2wave"):
+                proc = subprocess.run(
+                    ["text2wave", "-o", out_path],
+                    input=text,
+                    text=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            else:
+                # Fallback to festival --tts
+                proc = subprocess.run(
+                    ["festival", "--tts"],
+                    input=text,
+                    text=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                return  # festival --tts plays directly
+
+            if not no_play and Path(out_path).exists():
+                play_audio(out_path)
+
+            try:
+                Path(out_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+        except Exception as e:
+            cprint(Colors.YELLOW, f"⚠️ Festival TTS error: {e}")
+
+
+class RHVoiceTTS(TTSProvider):
+    """RHVoice - native Polish TTS, fast CPU."""
+    name = "rhvoice"
+
+    @classmethod
+    def is_available(cls, info: SystemInfo):
+        if shutil.which("RHVoice-test") or shutil.which("rhvoice-test"):
+            return True, "rhvoice found"
+        return False, "apt install rhvoice rhvoice-polish"
+
+    def speak(self, text: str) -> None:
+        cmd = shutil.which("RHVoice-test") or shutil.which("rhvoice-test")
+        if not cmd:
+            cprint(Colors.YELLOW, "⚠️ RHVoice not found")
+            return
+
+        no_play = os.environ.get("STTS_TTS_NO_PLAY", "").strip().lower() in ("1", "true", "yes", "y")
+
+        try:
+            voice = self.voice or "Anna"  # Polish voice
+
+            with tempfile.NamedTemporaryFile(prefix="stts_rhvoice_", suffix=".wav", delete=False) as f:
+                out_path = f.name
+
+            proc = subprocess.run(
+                [cmd, "-p", voice, "-o", out_path],
+                input=text,
+                text=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            if not no_play and Path(out_path).exists():
+                play_audio(out_path)
+
+            try:
+                Path(out_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+        except Exception as e:
+            cprint(Colors.YELLOW, f"⚠️ RHVoice error: {e}")
+
+
+class KokoroTTS(TTSProvider):
+    """Kokoro-82M - new open-source, fast on CPU."""
+    name = "kokoro"
+
+    @classmethod
+    def is_available(cls, info: SystemInfo):
+        try:
+            import kokoro
+            return True, "kokoro installed"
+        except ImportError:
+            return False, "pip install kokoro"
+
+    def speak(self, text: str) -> None:
+        try:
+            import kokoro
+        except ImportError:
+            cprint(Colors.YELLOW, "⚠️ kokoro not installed: pip install kokoro")
+            return
+
+        no_play = os.environ.get("STTS_TTS_NO_PLAY", "").strip().lower() in ("1", "true", "yes", "y")
+
+        try:
+            with tempfile.NamedTemporaryFile(prefix="stts_kokoro_", suffix=".wav", delete=False) as f:
+                out_path = f.name
+
+            # Kokoro API (simplified)
+            model = kokoro.KokoroTTS()
+            audio = model.generate(text)
+            import scipy.io.wavfile as wav
+            wav.write(out_path, 24000, audio)
+
+            if not no_play:
+                play_audio(out_path)
+
+            try:
+                Path(out_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+        except Exception as e:
+            cprint(Colors.YELLOW, f"⚠️ Kokoro TTS error: {e}")
+
+
+STT_PROVIDERS = {
+    "whisper_cpp": WhisperCppSTT,
+    "deepgram": DeepgramSTT,
+    "vosk": VoskSTT,
+    "coqui": CoquiSTT,
+    "picovoice": PicovoiceSTT,
+}
+TTS_PROVIDERS = {
+    "espeak": EspeakTTS,
+    "piper": PiperTTS,
+    "spd-say": SpdSayTTS,
+    "say": SayTTS,
+    "flite": FliteTTS,
+    "coqui-tts": CoquiTTS,
+    "festival": FestivalTTS,
+    "rhvoice": RHVoiceTTS,
+    "kokoro": KokoroTTS,
+}
 
 
 def _ts() -> str:
@@ -3122,12 +3399,192 @@ def _nlp2cmd_parallel_enabled(config: Optional[dict]) -> bool:
     return False
 
 
+# Wake-word patterns (hejken/heyken + common STT phonetic variants).
+# NOTE: Match only at the beginning of the transcript.
+WAKE_WORD_PATTERNS = [
+    # he(j|y)[, ]? (k)en/kan
+    r"^(?:hej|hey)\W*(?:ken|kan)\b",
+    r"^(?:hej|hey)\W+\w*\W*(?:ken|kan)\b",
+    # joined forms
+    r"^(?:hejken|heyken)\b",
+    # STT sometimes spells it as letters: "a i kan" / "ai kan"
+    r"^a\s*i\s*(?:ken|kan)\b",
+    r"^ai\s*(?:ken|kan)\b",
+    # common mishearing: "hi, kan"
+    r"^hi\W*(?:ken|kan)\b",
+    # Vosk often truncates to just "ken" at the start
+    r"^ken\b",
+    r"^kan\b",
+]
+
+
+def check_wake_word(text: str) -> Tuple[bool, str]:
+    """Check if text starts with wake word. Returns (matched, remaining_text)."""
+    if not text:
+        return False, ""
+    # Some STT engines may prepend punctuation/quotes or other non-word chars.
+    # Make matching robust by allowing an optional non-word prefix and removing
+    # the wake-word via regex substitution on the original text.
+    src = str(text)
+    for pattern in WAKE_WORD_PATTERNS:
+        pat = str(pattern or "")
+        if pat.startswith("^"):
+            pat = pat[1:]
+
+        full = r"^\s*[\W_]*" + pat
+        if re.match(full, src, re.IGNORECASE):
+            remaining = re.sub(full, "", src, count=1, flags=re.IGNORECASE)
+            remaining = remaining.strip(" \t\r\n,:;.!?\"'“”‘’—-")
+            return True, remaining.strip()
+    return False, src
+
+
+def normalize_daemon_command(text: str) -> str:
+    """Heurystyczna normalizacja komendy po wake-word (pod STT)."""
+    s = (text or "").strip()
+    if not s:
+        return ""
+
+    # lowercase for matching, but keep original as much as possible
+    lower = s.lower().strip()
+    # Common STT distortion for "lista": "js ta" / "jesta" etc.
+    lower = re.sub(r"\b(j|i)s\s*ta\b", "lista", lower)
+    lower = re.sub(r"\b(j|i)est\s*a\b", "lista", lower)
+    lower = re.sub(r"\ba\s+lista\b", "lista", lower)
+    # Remove leading filler tokens
+    lower = re.sub(r"^(a|i|y)\s+", "", lower)
+
+    # Reuse existing text normalizer (shell-oriented)
+    try:
+        lower = TextNormalizer.normalize(lower)
+    except Exception:
+        pass
+
+    return lower.strip()
+
+
+def _parse_trigger_spec(spec: str) -> Optional[Tuple[str, str, bool]]:
+    """Parse trigger specification.
+
+    Format:
+      - phrase=CMD  (literal phrase match, case-insensitive)
+      - /regex/=CMD (regex match)
+
+    Returns (pattern, command, is_regex)
+    """
+    s = str(spec or "").strip()
+    if not s or "=" not in s:
+        return None
+    left, right = s.split("=", 1)
+    left = left.strip()
+    cmd = right.strip()
+    if not left or not cmd:
+        return None
+    if left.startswith("/") and left.endswith("/") and len(left) > 2:
+        return left[1:-1], cmd, True
+    return left, cmd, False
+
+
+def load_triggers(trigger_specs: Optional[List[str]] = None, triggers_file: Optional[str] = None) -> List[Tuple[str, str, bool]]:
+    rules: List[Tuple[str, str, bool]] = []
+    for s in (trigger_specs or []):
+        r = _parse_trigger_spec(s)
+        if r:
+            rules.append(r)
+
+    if triggers_file:
+        try:
+            p = Path(triggers_file)
+            if p.exists() and p.is_file():
+                for line in p.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    r = _parse_trigger_spec(line)
+                    if r:
+                        rules.append(r)
+        except Exception:
+            pass
+
+    return rules
+
+
+def match_trigger(text: str, rules: List[Tuple[str, str, bool]]) -> Optional[str]:
+    """Return command if any trigger matches."""
+    t = (text or "").strip()
+    if not t:
+        return None
+    for pat, cmd, is_regex in (rules or []):
+        try:
+            if is_regex:
+                if re.search(pat, t, flags=re.IGNORECASE):
+                    return cmd
+            else:
+                if t.lower() == str(pat).strip().lower():
+                    return cmd
+        except Exception:
+            continue
+    return None
+
+
+def nlp2cmd_service_query(
+    query: str,
+    url: str = "http://localhost:8000",
+    execute: bool = True,
+    timeout: float = 30.0,
+) -> Optional[Dict[str, Any]]:
+    """Query nlp2cmd HTTP service. Returns response dict or None on error."""
+    try:
+        import urllib.request
+        import urllib.error
+
+        endpoint = f"{url.rstrip('/')}/query"
+        payload = json.dumps({
+            "query": query,
+            "dsl": "shell",
+            "execute": execute,
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            endpoint,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data
+    except urllib.error.URLError as e:
+        cprint(Colors.RED, f"❌ nlp2cmd service error: {e}")
+        return None
+    except Exception as e:
+        cprint(Colors.RED, f"❌ nlp2cmd query error: {e}")
+        return None
+
+
+def nlp2cmd_service_health(url: str, timeout: float = 2.5) -> bool:
+    """Check if nlp2cmd service is reachable via GET /health."""
+    try:
+        import urllib.request
+
+        endpoint = f"{url.rstrip('/')}/health"
+        with urllib.request.urlopen(endpoint, timeout=timeout) as resp:
+            if getattr(resp, "status", 0) != 200:
+                return False
+            data = json.loads(resp.read().decode("utf-8"))
+            return (data or {}).get("status") == "healthy"
+    except Exception:
+        return False
+
+
 class VoiceShell:
     def __init__(self, config: dict):
         self.config = config
         self.info = detect_system(fast=bool(self.config.get("fast_start", True)))
         self.stt = self._init_stt()
         self.tts = self._init_tts()
+        self._suppress_wake_word_logging = False
 
         HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
         if HISTORY_FILE.exists():
@@ -3189,7 +3646,12 @@ class VoiceShell:
         text = self.stt.transcribe(audio_path)
         elapsed = time.perf_counter() - t0
         if text:
-            cprint(Colors.GREEN, f"✅ \"{text}\" ({elapsed:.1f}s)")
+            shown = text
+            if self._suppress_wake_word_logging:
+                matched, remaining = check_wake_word(text)
+                if matched and remaining:
+                    shown = remaining
+            cprint(Colors.GREEN, f"✅ \"{shown}\" ({elapsed:.1f}s)")
         else:
             cprint(Colors.RED, f"❌ Nie rozpoznano ({elapsed:.1f}s)")
         return text
@@ -3458,6 +3920,154 @@ class VoiceShell:
             except EOFError:
                 break
 
+    def run_daemon(
+        self,
+        nlp2cmd_url: str = "http://localhost:8000",
+        execute: bool = True,
+        log_file: Optional[str] = None,
+    ) -> int:
+        """Run in daemon mode: continuous wake-word listening + nlp2cmd service."""
+        import datetime
+
+        def log(msg: str):
+            ts = datetime.datetime.now().strftime("%H:%M:%S")
+            line = f"[{ts}] {msg}"
+            print(line, file=sys.stderr, flush=True)
+            if log_file:
+                try:
+                    with open(log_file, "a") as f:
+                        f.write(line + "\n")
+                except Exception:
+                    pass
+
+        cprint(Colors.BOLD + Colors.CYAN, "\n🎙️  STTS Daemon Mode (wake-word: hejken)\n")
+        log(f"nlp2cmd service: {nlp2cmd_url}")
+        log(f"execute commands: {execute}")
+        log("Say 'hejken <command>' to execute. Ctrl+C to stop.")
+
+        log("🔎 Checking nlp2cmd /health ...")
+        if not nlp2cmd_service_health(nlp2cmd_url, timeout=2.5):
+            log("❌ nlp2cmd service is not healthy / not reachable")
+            log("   Start it first, e.g.: nlp2cmd service --host 0.0.0.0 --port 8008")
+            if self.tts:
+                try:
+                    self.speak("Serwis nlp2cmd nie odpowiada")
+                except Exception:
+                    pass
+            return 2
+
+        if self.tts and self.config.get("startup_tts", True):
+            self.speak("Słucham. Powiedz hejken i wydaj polecenie.")
+
+        self._suppress_wake_word_logging = True
+
+        while True:
+            try:
+                # Continuous listening
+                log("🎤 Listening...")
+                text = self.listen()
+
+                if not text:
+                    continue
+
+                log(f"📝 Heard: {text}")
+
+                # Check for wake word
+                matched, remaining = check_wake_word(text)
+
+                if not matched:
+                    log("⏭️  No wake word, ignoring")
+                    continue
+
+                if not remaining:
+                    # Wake word only, listen for command
+                    log("🔔 Wake word detected, listening for command...")
+                    if self.tts:
+                        self.speak("Słucham")
+                    remaining = self.listen()
+                    if not remaining:
+                        log("❌ No command heard")
+                        continue
+                    remaining = normalize_daemon_command(remaining)
+                    log(f"📝 Command: {remaining}")
+                else:
+                    # Wake word + command in one utterance -> log only the command
+                    remaining = normalize_daemon_command(remaining)
+                    log(f"📝 Command: {remaining}")
+
+                if not remaining:
+                    log("❌ Empty command after normalization")
+                    continue
+
+                # Hint domain for nlp2cmd service (service may ignore 'dsl' field and rely on text detection)
+                query_text = f"shell: {remaining}"
+
+                # Query nlp2cmd service
+                log(f"🚀 Sending to nlp2cmd: {query_text}")
+                result = nlp2cmd_service_query(
+                    query=query_text,
+                    url=nlp2cmd_url,
+                    execute=execute,
+                    timeout=30.0,
+                )
+
+                if not result:
+                    log("❌ nlp2cmd service failed")
+                    if self.tts:
+                        self.speak("Nie udało się połączyć z serwisem")
+                    continue
+
+                if not result.get("success"):
+                    errors = result.get("errors") or ["Unknown error"]
+                    log(f"❌ nlp2cmd error: {errors}")
+                    if self.tts:
+                        self.speak(f"Błąd: {errors[0][:50]}")
+                    continue
+
+                cmd = result.get("command", "")
+                confidence = result.get("confidence", 0)
+                log(f"✅ Command: {cmd} (confidence: {confidence:.2f})")
+
+                if self.tts:
+                    self.speak(f"Wykonuję: {cmd[:80]}")
+
+                # Check if nlp2cmd already executed
+                exec_result = result.get("execution_result")
+                if exec_result:
+                    if exec_result.get("success"):
+                        stdout = exec_result.get("stdout", "")
+                        log(f"📤 Output: {stdout[:200]}")
+                        if stdout.strip() and self.tts:
+                            lines = [l.strip() for l in stdout.splitlines() if l.strip()]
+                            if lines:
+                                self.speak(lines[-1][:100])
+                    else:
+                        stderr = exec_result.get("stderr", "")
+                        log(f"❌ Execution failed: {stderr[:100]}")
+                        if self.tts:
+                            self.speak("Komenda nie powiodła się")
+                else:
+                    # Execute locally if not executed by service
+                    log(f"▶️  Executing locally: {cmd}")
+                    out, code, _ = self.run_command_any(cmd)
+                    if out.strip():
+                        print(out, flush=True)
+                        lines = [l.strip() for l in out.splitlines() if l.strip()]
+                        if lines and self.tts:
+                            self.speak(lines[-1][:100])
+                    if code != 0:
+                        log(f"❌ Exit code: {code}")
+
+            except KeyboardInterrupt:
+                log("🛑 Stopping daemon...")
+                break
+            except Exception as e:
+                log(f"❌ Error: {e}")
+                continue
+
+        log("👋 Daemon stopped")
+        return 0
+
 
 def parse_args(argv: List[str]):
     stt_file = None
@@ -3485,6 +4095,12 @@ def parse_args(argv: List[str]):
     list_stt = False
     list_tts = False
     nlp2cmd_parallel = None
+    daemon_mode = False
+    nlp2cmd_url = None
+    daemon_log = None
+    daemon_no_execute = False
+    daemon_triggers: List[str] = []
+    daemon_triggers_file = None
     rest: List[str] = []
 
     it = iter(argv)
@@ -3545,11 +4161,25 @@ def parse_args(argv: List[str]):
             list_stt = True
         elif a == "--list-tts":
             list_tts = True
+        elif a in ("--daemon", "--service"):
+            daemon_mode = True
+        elif a == "--nlp2cmd-url":
+            nlp2cmd_url = next(it, None)
+        elif a == "--daemon-log":
+            daemon_log = next(it, None)
+        elif a == "--no-execute":
+            daemon_no_execute = True
+        elif a == "--trigger":
+            v = next(it, None)
+            if v:
+                daemon_triggers.append(v)
+        elif a == "--triggers-file":
+            daemon_triggers_file = next(it, None)
         elif a in ("--help", "-h"):
             help_ = True
         else:
             rest.append(a)
-    return stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, stt_provider, stt_model, list_stt, list_tts, nlp2cmd_parallel, rest
+    return stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, stt_provider, stt_model, list_stt, list_tts, nlp2cmd_parallel, daemon_mode, nlp2cmd_url, daemon_log, daemon_no_execute, daemon_triggers, daemon_triggers_file, rest
 
 
 def tts_test(shell: "VoiceShell", text: str) -> int:
@@ -3675,7 +4305,7 @@ def expand_placeholders(args: List[str], shell: 'VoiceShell', config: dict, stt_
 
 def main():
     config = load_config()
-    stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test_flag, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, stt_provider_arg, stt_model_arg, list_stt, list_tts, nlp2cmd_parallel, rest = parse_args(sys.argv[1:])
+    stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test_flag, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, stt_provider_arg, stt_model_arg, list_stt, list_tts, nlp2cmd_parallel, daemon_mode, nlp2cmd_url, daemon_log, daemon_no_execute, rest = parse_args(sys.argv[1:])
 
     # Apply CLI overrides for STT provider/model
     if stt_provider_arg:
@@ -3736,6 +4366,16 @@ def main():
         print("  STTS_DEEPGRAM_MODEL=... Deepgram model (np. nova-2)")
         print("  STTS_PIPER_AUTO_INSTALL=1  Auto-install piper binarki (local)")
         print("  STTS_PIPER_AUTO_DOWNLOAD=1 Auto-download modelu piper dla tts_voice")
+        print("\nTryb daemon (wake-word + nlp2cmd service):")
+        print("  --daemon / --service   Uruchom w trybie ciągłego nasłuchiwania (wake-word: hejken)")
+        print("  --nlp2cmd-url URL      URL serwisu nlp2cmd (domyślnie: http://localhost:8000)")
+        print("  --daemon-log FILE      Zapisz logi do pliku")
+        print("  --no-execute           Tylko tłumacz (nie wykonuj komend)")
+        print("\nPrzykład uruchomienia:")
+        print("  # Terminal 1: nlp2cmd service")
+        print("  nlp2cmd service --host 0.0.0.0 --port 8000")
+        print("  # Terminal 2: stts daemon")
+        print("  ./stts --daemon --nlp2cmd-url http://localhost:8000")
         return 0
 
     if list_stt:
@@ -3788,6 +4428,17 @@ def main():
 
     if tts_stdin:
         return tts_from_stdin(shell)
+
+    # Daemon mode: wake-word + nlp2cmd service
+    if daemon_mode:
+        url = nlp2cmd_url or os.environ.get("STTS_NLP2CMD_URL", "http://localhost:8000")
+        execute = not daemon_no_execute
+        code = shell.run_daemon(
+            nlp2cmd_url=url,
+            execute=execute,
+            log_file=daemon_log,
+        )
+        return int(code or 0)
 
     if stt_stream_shell:
         if not stream_shell_cmd:

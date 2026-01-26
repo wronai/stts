@@ -88,6 +88,8 @@ help:
 	@echo "  make stt-vosk-pl-full - install Vosk + full Polish model (bigger, better)"
 	@echo "  make stt-silero       - install Silero STT (torch-based)"
 	@echo "  make stt-whisper-stream - build whisper.cpp streaming mode"
+	@echo "  make stt-coqui        - install Coqui STT (lightweight, CPU)"
+	@echo "  make stt-picovoice    - install Picovoice Leopard (ultra-light)"
 	@echo ""
 	@echo "Local TTS (offline):"
 	@echo "  make tts-setup-espeak - configure espeak TTS"
@@ -95,6 +97,9 @@ help:
 	@echo "  make tts-piper-pl     - install Piper + Polish voices"
 	@echo "  make tts-mimic3       - install Mimic3 TTS"
 	@echo "  make tts-festival     - install Festival TTS"
+	@echo "  make tts-rhvoice      - install RHVoice (native Polish)"
+	@echo "  make tts-coqui        - install Coqui TTS (neural, XTTS-v2)"
+	@echo "  make tts-kokoro       - install Kokoro TTS (fast CPU)"
 	@echo ""
 	@echo "Full local stack:"
 	@echo "  make setup-local-full - install Vosk PL + Piper PL (250MB)"
@@ -176,6 +181,44 @@ tts-festival:
 	@echo "📦 Installing Festival..."
 	@echo "Run: sudo apt install -y festival festvox-kallpc16k"
 	@echo "✅ Festival ready (if installed)"
+
+# RHVoice (native Polish TTS)
+tts-rhvoice:
+	@echo "📦 Installing RHVoice..."
+	@echo "Run: sudo apt install -y rhvoice rhvoice-polish"
+	@echo "✅ RHVoice ready (if installed). Test: ./stts --tts-provider rhvoice --tts-test"
+
+# Coqui TTS (neural, XTTS-v2 multilingual)
+tts-coqui:
+	@echo "📦 Installing Coqui TTS..."
+	@$(PIP) -U TTS
+	@echo "✅ Coqui TTS ready. Test: ./stts --tts-provider coqui-tts --tts-test"
+
+# Kokoro TTS (new open-source, fast CPU)
+tts-kokoro:
+	@echo "📦 Installing Kokoro TTS..."
+	@$(PIP) -U kokoro scipy
+	@echo "✅ Kokoro TTS ready. Test: ./stts --tts-provider kokoro --tts-test"
+
+# ============================================================================
+# NEW STT PROVIDERS
+# ============================================================================
+
+# Coqui STT (lightweight, CPU-friendly)
+stt-coqui:
+	@echo "📦 Installing Coqui STT..."
+	@$(PIP) -U coqui-stt
+	@mkdir -p $(CACHE_DIR)/models/coqui
+	@echo "⚠️  Download Polish model manually from: https://coqui.ai/models"
+	@echo "   Place model.tflite in: $(CACHE_DIR)/models/coqui/"
+	@echo "✅ Coqui STT ready"
+
+# Picovoice Leopard (ultra-light, embedded)
+stt-picovoice:
+	@echo "📦 Installing Picovoice Leopard..."
+	@$(PIP) -U pvleopard
+	@echo "⚠️  Set PICOVOICE_ACCESS_KEY env (get free key at console.picovoice.ai)"
+	@echo "✅ Picovoice STT ready"
 
 # ============================================================================
 # FULL LOCAL SETUP (zero network after install)

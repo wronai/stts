@@ -56,6 +56,55 @@ STTS_MOCK_STT=1 ./python/stts --stt-file python/samples/cmd_ls.wav \
 ./python/stts --stt-once | ./python/stts nlp2cmd -r stdin --auto-confirm
 ```
 
+## Daemon Mode: Wake-word + nlp2cmd Service
+
+Tryb ciągłego nasłuchiwania z wake-word "hejken" i integracją z nlp2cmd HTTP service.
+
+**Terminal 1: uruchom nlp2cmd service**
+
+```bash
+cd /home/tom/github/wronai/nlp2cmd
+nlp2cmd service --host 0.0.0.0 --port 8008
+```
+
+**Terminal 2: uruchom stts daemon**
+
+```bash
+./python/stts --daemon --nlp2cmd-url http://localhost:8008
+```
+
+Lepsza jakość STT (offline):
+
+```bash
+./python/stts --daemon --nlp2cmd-url http://localhost:8008 --stt-provider whisper_cpp --stt-model medium
+```
+
+Uwaga: przy pierwszym uruchomieniu może pobierać model (np. `medium` ~ 1.5 GB).
+
+Gotowy skrypt:
+
+```bash
+bash examples/daemon_nlp2cmd.sh
+```
+
+### Opcje daemon mode
+
+| Opcja | Opis |
+|-------|------|
+| `--daemon` / `--service` | Uruchom w trybie ciągłego nasłuchiwania |
+| `--nlp2cmd-url URL` | URL serwisu nlp2cmd (domyślnie: `http://localhost:8000`) |
+| `--daemon-log FILE` | Zapisz logi do pliku |
+| `--no-execute` | Tylko tłumacz (nie wykonuj komend) |
+| `--stt-provider NAME` | Wybór STT (np. `whisper_cpp`, `vosk`, `deepgram`) |
+| `--stt-model VALUE` | Model STT (np. `medium` dla whisper.cpp) |
+
+### Przykłady użycia (mów do mikrofonu)
+
+- "hejken lista folderów"
+- "hejken pokaż wszystkie procesy"
+- "hejken uruchom docker"
+- "hey ken znajdź pliki większe niż 100MB"
+
 Tip (CI): wyłącz odtwarzanie audio:
 
 ```bash

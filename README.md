@@ -508,6 +508,111 @@ Alternatywa (zawsze odporna na quoting): STT → stdout → `nlp2cmd stdin`:
 
 `{STT_STREAM}` jest aliasem `{STT}` (MVP). Docelowo można tu podłączyć partial transcripts (live captions).
 
+### Daemon Mode: Wake-word + nlp2cmd Service (Python)
+
+Tryb ciągłego nasłuchiwania z wake-word "hejken" i integracją z nlp2cmd HTTP service:
+
+```bash
+# Terminal 1: uruchom nlp2cmd service
+nlp2cmd service --host 0.0.0.0 --port 8008
+nlp2cmd service --auto-execute --host 0.0.0.0 --port 8008
+
+# Terminal 2: uruchom stts daemon
+./stts --daemon --nlp2cmd-url http://localhost:8008
+./stts --daemon --nlp2cmd-url http://localhost:8008 --stt-provider vosk --stt-model pl
+```
+
+Lepsza jakość STT (polecane offline): `whisper_cpp` + większy model (np. `medium`):
+
+```bash
+./stts --daemon --nlp2cmd-url http://localhost:8008 --stt-provider whisper_cpp --stt-model medium
+```
+
+Uwaga: przy pierwszym uruchomieniu może pobierać model (np. `medium` ~ 1.5 GB).
+
+Alternatywnie możesz ustawić URL serwisu przez env:
+
+```bash
+export STTS_NLP2CMD_URL=http://localhost:8008
+./stts --daemon --stt-provider whisper_cpp --stt-model medium
+```
+
+Mów do mikrofonu:
+- "hejken lista folderów"
+- "ken pokaż procesy" (Vosk często rozpoznaje tylko "ken")
+- "hey ken uruchom docker"
+
+### Pełna lista opcji CLI
+
+| Opcja | Parametr | Opis | Przykład |
+|-------|----------|------|----------|
+| `--daemon` / `--service` | - | Tryb ciągłego nasłuchiwania (wake-word) | `./stts --daemon` |
+| `--nlp2cmd-url` | URL | URL serwisu nlp2cmd | `--nlp2cmd-url http://localhost:8008` |
+| `--daemon-log` | FILE | Zapisz logi do pliku | `--daemon-log /tmp/stts.log` |
+| `--no-execute` | - | Tylko tłumacz (nie wykonuj komend) | `--no-execute` |
+| `--stt-provider` | NAME | Provider STT | `--stt-provider whisper_cpp` |
+| `--stt-model` | VALUE | Model STT | `--stt-model medium` |
+| `--tts-provider` | NAME | Provider TTS | `--tts-provider piper` |
+| `--tts-voice` | VOICE | Głos TTS | `--tts-voice pl_PL-gosia-medium` |
+| `--stt-file` | FILE | Transkrybuj plik WAV (zamiast mikrofonu) | `--stt-file audio.wav` |
+| `--stt-only` | - | Tylko STT, bez wykonania | `--stt-only` |
+| `--stt-once` | - | Jednorazowe STT → stdout | `--stt-once` |
+| `--dry-run` | - | Pokaż komendę bez wykonania | `--dry-run` |
+| `--safe-mode` | - | Zawsze pytaj przed wykonaniem | `--safe-mode` |
+| `--stream` | - | Strumieniuj output komendy | `--stream` |
+| `--fast-start` | - | Szybszy start (mniej detekcji) | `--fast-start` |
+| `--stt-gpu-layers` | N | Liczba warstw na GPU (whisper.cpp) | `--stt-gpu-layers 35` |
+| `--tts-test` | [TEXT] | Test TTS i wyjdź | `--tts-test "Hello"` |
+| `--tts-stdin` | - | Czytaj stdin i przeczytaj TTS | `echo "test" \| ./stts --tts-stdin` |
+| `--install-piper` | - | Pobierz binarkę piper | `--install-piper` |
+| `--download-piper-voice` | VOICE | Pobierz głos piper | `--download-piper-voice pl_PL-gosia-medium` |
+| `--list-stt` | - | Lista dostępnych STT | `--list-stt` |
+| `--list-tts` | - | Lista dostępnych TTS | `--list-tts` |
+| `--setup` | - | Interaktywny wizard | `--setup` |
+| `--init` | PROVIDER[:MODEL] | Szybka inicjalizacja | `--init whisper_cpp:medium` |
+| `--help` | - | Pokaż pomoc | `--help` |
+
+### Przykłady użycia
+
+```bash
+# Daemon mode z Vosk (lekki, szybki):
+./stts --daemon --nlp2cmd-url http://localhost:8008 --stt-provider vosk --stt-model small-pl
+
+# Daemon mode z Whisper.cpp (lepsza jakość):
+./stts --daemon --nlp2cmd-url http://localhost:8008 --stt-provider whisper_cpp --stt-model medium
+
+# Jednorazowe STT z pliku:
+./stts --stt-file audio.wav --stt-only
+
+# STT → nlp2cmd pipeline:
+./stts --stt-once | nlp2cmd -r stdin --auto-confirm
+
+# Test TTS:
+./stts --tts-provider piper --tts-voice pl_PL-gosia-medium --tts-test "Test głosu"
+
+# Lista dostępnych providerów:
+./stts --list-stt
+./stts --list-tts
+```
+
+### Zmienne środowiskowe
+
+| Zmienna | Opis | Przykład |
+|---------|------|----------|
+| `STTS_STT_PROVIDER` | Provider STT | `whisper_cpp` |
+| `STTS_STT_MODEL` | Model STT | `medium` |
+| `STTS_TTS_PROVIDER` | Provider TTS | `piper` |
+| `STTS_TTS_VOICE` | Głos TTS | `pl_PL-gosia-medium` |
+| `STTS_NLP2CMD_URL` | URL nlp2cmd service | `http://localhost:8008` |
+| `STTS_DEEPGRAM_KEY` | Deepgram API key | `...` |
+| `PICOVOICE_ACCESS_KEY` | Picovoice API key | `...` |
+| `STTS_VAD_ENABLED` | Włącz VAD | `1` |
+| `STTS_VAD_SILENCE_MS` | Czas ciszy do stop (ms) | `800` |
+| `STTS_TTS_NO_PLAY` | Nie odtwarzaj audio (CI) | `1` |
+| `STTS_SAFE_MODE` | Tryb bezpieczny | `1` |
+| `STTS_FAST_START` | Szybszy start | `1` |
+| `STTS_STT_GPU_LAYERS` | Warstwy GPU (whisper.cpp) | `35` |
+
 ### Pipeline (jednorazowe STT → stdout, Python)
 
 Tryb `--stt-once` wypisuje sam transkrypt na stdout (a logi na stderr), więc nadaje się do pipe:
@@ -633,6 +738,27 @@ make stt-vosk-pl
 ./stts --stt-provider vosk --stt-model small-pl --stt-file samples/cmd_ls.wav --stt-only
 ```
 
+### STT: coqui (CPU-friendly, dobre akcenty PL)
+
+```bash
+cd python
+make stt-coqui
+
+# Użycie:
+./stts --stt-provider coqui --stt-file samples/cmd_ls.wav --stt-only
+```
+
+### STT: picovoice (ultra-lekki, embedded)
+
+```bash
+cd python
+make stt-picovoice
+
+# Wymaga klucza API (darmowy na console.picovoice.ai):
+export PICOVOICE_ACCESS_KEY="..."
+./stts --stt-provider picovoice --stt-file samples/cmd_ls.wav --stt-only
+```
+
 ### TTS: piper (neural, rekomendowany)
 
 ```bash
@@ -658,6 +784,45 @@ make tts-setup-piper
 
 ```bash
 sudo apt install espeak
+```
+
+### TTS: rhvoice (natywny polski)
+
+```bash
+cd python
+make tts-rhvoice
+
+# Użycie:
+./stts --tts-provider rhvoice --tts-voice Anna --tts-test "Test polskiego głosu"
+```
+
+### TTS: coqui-tts (neural, XTTS-v2)
+
+```bash
+cd python
+make tts-coqui
+
+# Użycie:
+./stts --tts-provider coqui-tts --tts-voice pl --tts-test "Test neuronowego głosu"
+```
+
+### TTS: festival (ultra-lekki)
+
+```bash
+sudo apt install festival festvox-kallpc16k
+
+# Użycie:
+./stts --tts-provider festival --tts-test "Test"
+```
+
+### TTS: kokoro (szybki CPU, open-source)
+
+```bash
+cd python
+make tts-kokoro
+
+# Użycie:
+./stts --tts-provider kokoro --tts-test "Test"
 ```
 
 ## 🍓 Raspberry Pi
