@@ -358,6 +358,8 @@ printf "%-15s %-15s %-10s %-10s %-10s\n" "STT" "TTS" "avg(s)" "p95(s)" "WER(avg)
 echo "─────────────────────────────────────────────────────────────────────────────────"
 
 total_iters=$((BENCH_ITERS + BENCH_WARMUP))
+rr_step=0
+rr_total=$(( total_iters * ${#COMBOS[@]} * ${#SAMPLE_FILES[@]} ))
 for iter in $(seq 1 "$total_iters"); do
   for combo in "${COMBOS[@]}"; do
     IFS='|' read -r stt_provider stt_model tts_provider tts_voice <<<"$combo"
@@ -369,6 +371,10 @@ for iter in $(seq 1 "$total_iters"); do
       if [ -z "${expected}" ]; then
         continue
       fi
+
+      rr_step=$((rr_step + 1))
+      printf "\r[round-robin] %d/%d iter=%d/%d stt=%s tts=%s sample=%s" \
+        "$rr_step" "$rr_total" "$iter" "$total_iters" "$stt_provider" "$tts_provider" "${sample%.wav}" >&2
 
       stt_cmd="$PYTHON $STTS --stt-provider $stt_provider"
       if [ -n "$stt_model" ]; then
@@ -399,6 +405,8 @@ for iter in $(seq 1 "$total_iters"); do
     done
   done
 done
+
+echo "" >&2
 
 for combo in "${COMBOS[@]}"; do
   IFS='|' read -r stt_provider _ tts_provider _ <<<"$combo"

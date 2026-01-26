@@ -37,8 +37,8 @@ Metryki:
 
 | Provider | Model | avg latency (s) | p95 latency (s) | WER (avg) | Notes |
 |---|---:|---:|---:|---:|---|
-| `whisper_cpp` | `base` | ~0.86 | ~1.12 | ~1.00 | szybki, ale syntetyczne próbki mogą być rozpoznawane jako `[MUZYKA]` |
-| `vosk` | `small-pl` | ~1.22 | ~1.40 | ~1.00 | stabilny offline, ale accuracy zależy od jakości próbek |
+| `whisper_cpp` | `default` | 0.7076 | 0.7511 | 1.0000 | szybki, ale syntetyczne próbki mogą być rozpoznawane jako `[MUZYKA]` |
+| `vosk` | `small-pl` | 1.1679 | 1.2912 | 1.0000 | stabilny offline, ale accuracy zależy od jakości próbek |
 
 ### TTS (Text-to-Speech)
 
@@ -46,8 +46,8 @@ Pomiary TTS w benchmarku są wykonywane z `STTS_TTS_NO_PLAY=1` (bez odtwarzania 
 
 | Provider | Voice | avg latency (s) | p95 latency (s) | Notes |
 |---|---:|---:|---:|---|
-| `piper` | `pl` (alias → `pl_PL-gosia-medium`) | ~0.50 | ~0.54 | neural, najlepsza jakość |
-| `espeak` | `pl` | ~0.13 | ~0.13 | najszybszy, ale gorsza jakość |
+| `piper` | `pl` (alias → `pl_PL-gosia-medium`) | 0.4827 | 0.5345 | neural, najlepsza jakość |
+| `espeak` | `pl` | 0.1246 | 0.1258 | najszybszy, ale gorsza jakość |
 
 ### Pipeline STT→TTS (round-robin, na przemian)
 
@@ -55,10 +55,10 @@ Benchmark testuje kombinacje STT×TTS w trybie „na przemian” (round-robin) z
 
 | STT | TTS | avg total (s) | p95 total (s) |
 |---|---|---:|---:|
-| `whisper_cpp` | `piper` | ~1.21 | ~1.28 |
-| `whisper_cpp` | `espeak` | ~0.90 | ~1.01 |
-| `vosk` | `piper` | ~1.73 | ~2.03 |
-| `vosk` | `espeak` | ~1.43 | ~1.88 |
+| `whisper_cpp` | `piper` | 1.1912 | 1.3164 |
+| `whisper_cpp` | `espeak` | 0.9137 | 1.0259 |
+| `vosk` | `piper` | 1.6684 | 1.8509 |
+| `vosk` | `espeak` | 1.3947 | 1.5817 |
 
 ### Jak odtworzyć benchmark
 
@@ -75,12 +75,37 @@ Wyniki CSV są zapisywane w `/tmp/stts_benchmark_*/results.csv`.
 Skrypt automatycznie wczytuje `.env` (z katalogu uruchomienia, `python/` albo root repo).
 Szablon: `python/.env.example`.
 
-Przykład:
+ Przykład:
+ 
+ ```bash
+ cp .env.example .env
+ ```
 
-```bash
-cp .env.example .env
-```
-
+ ### Setup: Vosk (STT) + Piper (TTS) — komendy
+ 
+ ```bash
+ sudo apt update
+ sudo apt install -y curl unzip pulseaudio-utils alsa-utils sox
+ 
+ cd python
+ cp .env.example .env
+ 
+ make stt-vosk-pl
+ make tts-setup-piper
+ 
+ ./stts --tts-provider piper --tts-voice pl_PL-gosia-medium --tts-test "Cześć, to działa."
+ ./stts --stt-provider vosk --stt-model small-pl --stt-file samples/cmd_ls.wav --stt-only
+ ```
+ 
+ Wpis do `.env` (przykład):
+ 
+ ```bash
+ STTS_STT_PROVIDER=vosk
+ STTS_STT_MODEL=small-pl
+ STTS_TTS_PROVIDER=piper
+ STTS_TTS_VOICE=pl_PL-gosia-medium
+ ```
+ 
 Najważniejsze zmienne:
 
 - `STTS_CONFIG_DIR` - gdzie trzymać modele i config (przydatne dla Docker cache)

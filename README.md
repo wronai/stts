@@ -611,7 +611,11 @@ pip install faster-whisper
 ### STT: vosk (lekki, RPi)
 
 ```bash
-pip install vosk
+cd python
+make stt-vosk-pl
+
+# Użycie (przykład):
+./stts --stt-provider vosk --stt-model small-pl --stt-file samples/cmd_ls.wav --stt-only
 ```
 
 ### TTS: piper (neural, rekomendowany)
@@ -625,26 +629,9 @@ pip install vosk
 
 # Modele trzymane są w:
 ~/.config/stts-python/models/piper/
-```
 
-Wymagania:
-
-- `piper` w `PATH` (binarka)
-- model `*.onnx` w `~/.config/stts-python/models/piper/`
-- odtwarzacz audio: `paplay` lub `aplay` lub `play`
-
-Szybki check:
-
-```bash
-command -v piper
-ls ~/.config/stts-python/models/piper/*.onnx
-command -v paplay || command -v aplay || command -v play
-```
-
-**Automatyzacja (Python):**
-
-```bash
 # Auto-install piper + auto-download głosu
+cd python
 ./stts --install-piper
 ./stts --download-piper-voice pl_PL-gosia-medium
 
