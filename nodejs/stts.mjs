@@ -26,6 +26,69 @@ import { fileURLToPath } from 'node:url';
 
 function loadDotenv() {
     const candidates = [];
+
+const PHONETIC_KEYS = Object.keys(PHONETIC_EN_CORRECTIONS);
+const FUZZY_CACHE = new Map();
+
+function levenshteinBounded(a, b, maxDist) {
+    if (a === b) return 0;
+    const al = a.length;
+    const bl = b.length;
+    if (Math.abs(al - bl) > maxDist) return maxDist + 1;
+    if (al === 0) return bl;
+    if (bl === 0) return al;
+
+    let prev = new Array(bl + 1);
+    let cur = new Array(bl + 1);
+    for (let j = 0; j <= bl; j++) prev[j] = j;
+
+    for (let i = 1; i <= al; i++) {
+        cur[0] = i;
+        let rowMin = cur[0];
+        const ca = a.charCodeAt(i - 1);
+        for (let j = 1; j <= bl; j++) {
+            const cost = ca === b.charCodeAt(j - 1) ? 0 : 1;
+            const v = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+            cur[j] = v;
+            if (v < rowMin) rowMin = v;
+        }
+        if (rowMin > maxDist) return maxDist + 1;
+        const tmp = prev;
+        prev = cur;
+        cur = tmp;
+    }
+    return prev[bl];
+}
+
+function fuzzyPhoneticReplacement(clean) {
+    const s = String(clean || '').trim().toLowerCase();
+    if (!s) return null;
+    if (s.length < 4 || s.length > 18) return null;
+    if (!/^[a-ząćęłńóśźż]+$/i.test(s)) return null;
+    if (s.includes(' ')) return null;
+
+    if (FUZZY_CACHE.has(s)) return FUZZY_CACHE.get(s);
+
+    const maxDist = s.length <= 6 ? 1 : 2;
+    let bestKey = null;
+    let bestDist = maxDist + 1;
+
+    for (const k of PHONETIC_KEYS) {
+        if (k.includes(' ')) continue;
+        if (Math.abs(k.length - s.length) > maxDist) continue;
+        const d = levenshteinBounded(s, k, maxDist);
+        if (d < bestDist) {
+            bestDist = d;
+            bestKey = k;
+            if (bestDist === 0) break;
+        }
+    }
+
+    const out = bestKey && bestDist <= maxDist ? PHONETIC_EN_CORRECTIONS[bestKey] : null;
+    FUZZY_CACHE.set(s, out);
+    if (FUZZY_CACHE.size > 4096) FUZZY_CACHE.clear();
+    return out;
+}
     try {
         const here = dirname(fileURLToPath(import.meta.url));
         candidates.push(join(process.cwd(), '.env'));
@@ -263,8 +326,11 @@ function fixPhoneticEnglish(text) {
     for (const word of words) {
         const lower = word.toLowerCase();
         const clean = lower.replace(/^[.,!?;:"'()\[\]{}]+|[.,!?;:"'()\[\]{}]+$/g, '');
-        if (PHONETIC_EN_CORRECTIONS[clean]) {
-            let replacement = PHONETIC_EN_CORRECTIONS[clean];
+        const direct = PHONETIC_EN_CORRECTIONS[clean];
+        const fuzzy = direct ? null : fuzzyPhoneticReplacement(clean);
+        const chosen = direct || fuzzy;
+        if (chosen) {
+            let replacement = chosen;
             if (word[0] && word[0] === word[0].toUpperCase()) {
                 replacement = replacement.charAt(0).toUpperCase() + replacement.slice(1);
             }

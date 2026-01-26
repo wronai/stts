@@ -34,6 +34,7 @@ Najważniejsze zmienne:
 - `STTS_NLP2CMD_ENABLED=1` - włącza NL → komenda przez `nlp2cmd` (CLI)
 - `STTS_NLP2CMD_ARGS=-r` - tryb jak w przykładach ("Pokaż użytkowników")
 - `STTS_NLP2CMD_CONFIRM=1` - zawsze pytaj o potwierdzenie
+- `STTS_NLP2CMD_PARALLEL=1` - prewarm `nlp2cmd` w tle (worker Pythona, mniejsze opóźnienie po STT)
 - `STTS_STREAM=1` - strumieniuj output komend (bez buforowania)
 - `STTS_FAST_START=1` - szybszy start (mniej detekcji sprzętu)
 - `STTS_STT_GPU_LAYERS=35` - whisper.cpp: liczba warstw na GPU (`-ngl`, wymaga build GPU)
@@ -70,6 +71,19 @@ Przykłady:
 ```bash
 nlp2cmd -r "Pokaż użytkowników"
 nlp2cmd -r "otwórz https://www.prototypowanie.pl/kontakt/ i wypelnij formularz i wyslij"
+```
+
+### Prewarm / tryb równoległy (mniejsze opóźnienie)
+
+`nlp2cmd` jest pakietem Pythona i potrafi mieć zauważalny koszt startu.
+Gdy ustawisz `STTS_NLP2CMD_PARALLEL=1`, `stts.mjs` odpala w tle proces Pythona z załadowanym pipeline i dokarmia go tekstem po STT.
+
+### `{STT}` + nlp2cmd (fast-path)
+
+Jeśli chcesz używać dokładnie składni jak w wersji Python (placeholder), możesz uruchomić:
+
+```bash
+STTS_NLP2CMD_ENABLED=1 STTS_NLP2CMD_PARALLEL=1 ./stts.mjs nlp2cmd -r "{STT}" --auto-confirm
 ```
 
 ## Testowanie bez mikrofonu (symulacja w Docker/CI)

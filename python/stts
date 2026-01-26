@@ -36,6 +36,8 @@ import contextlib
 import tempfile
 import re
 import signal
+import difflib
+import functools
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional, List, Tuple
@@ -1460,7 +1462,7 @@ class TextNormalizer:
         for pattern, replacement in cls.REGEX_FIXES:
             result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
 
-        result = cls._fix_phonetic_english(result)
+        result = cls._fix_phonetic_english(result, language)
 
         lower = result.lower().strip()
         for wrong, correct in cls.SHELL_CORRECTIONS.items():
@@ -1470,21 +1472,56 @@ class TextNormalizer:
         return result
 
     @classmethod
-    def _fix_phonetic_english(cls, text: str) -> str:
+    def _fix_phonetic_english(cls, text: str, language: str = "pl") -> str:
         """Poprawia angielskie słowa techniczne zapisane fonetycznie po polsku."""
+        if (language or "pl").lower() not in ("pl", "polish"):
+            return text
+
         words = text.split()
         fixed = []
         for word in words:
-            lower = word.lower()
-            clean = lower.strip('.,!?;:"\'()[]{}')
-            if clean in cls.PHONETIC_EN_CORRECTIONS:
-                replacement = cls.PHONETIC_EN_CORRECTIONS[clean]
-                if word[0].isupper():
-                    replacement = replacement.capitalize()
-                fixed.append(word.replace(clean, replacement, 1) if clean != lower else replacement)
-            else:
+            m = re.match(r"^([.,!?;:\"\'()\[\]{}]*)(.*?)([.,!?;:\"\'()\[\]{}]*)$", word)
+            if not m:
                 fixed.append(word)
+                continue
+            prefix, core, suffix = m.groups()
+            if not core:
+                fixed.append(word)
+                continue
+
+            clean = core.lower()
+            replacement = cls.PHONETIC_EN_CORRECTIONS.get(clean)
+            if replacement is None:
+                replacement = cls._fuzzy_phonetic_replacement(clean)
+            if replacement is None:
+                fixed.append(word)
+                continue
+
+            if core[:1].isupper() and replacement[:1].isalpha():
+                replacement = replacement[:1].upper() + replacement[1:]
+            fixed.append(f"{prefix}{replacement}{suffix}")
         return " ".join(fixed)
+
+    @staticmethod
+    @functools.lru_cache(maxsize=4096)
+    def _fuzzy_phonetic_replacement(clean: str) -> Optional[str]:
+        s = (clean or "").strip().lower()
+        if not s:
+            return None
+        if len(s) < 4 or len(s) > 18:
+            return None
+        if not s.isalpha():
+            return None
+
+        keys = [k for k in TextNormalizer.PHONETIC_EN_CORRECTIONS.keys() if " " not in k]
+        candidates = [k for k in keys if abs(len(k) - len(s)) <= 2]
+        if not candidates:
+            return None
+
+        m = difflib.get_close_matches(s, candidates, n=1, cutoff=0.84)
+        if not m:
+            return None
+        return TextNormalizer.PHONETIC_EN_CORRECTIONS.get(m[0])
 
 
 class STTProvider:
@@ -2338,6 +2375,14 @@ def is_sql_command(cmd: str) -> bool:
     return False
 
 
+_NLP2CMD_WORKER = None
+
+
+def _resolve_nlp2cmd_python() -> str:
+    v = os.environ.get("STTS_NLP2CMD_PYTHON", "").strip()
+    return v or sys.executable
+
+
 def nlp2cmd_prewarm(config: Optional[dict] = None) -> None:
     global _NLP2CMD_WORKER
     if not _nlp2cmd_parallel_enabled(config):
@@ -2345,7 +2390,7 @@ def nlp2cmd_prewarm(config: Optional[dict] = None) -> None:
     if _NLP2CMD_WORKER is not None:
         return
     try:
-        _NLP2CMD_WORKER = _NLP2CMDWorker(sys.executable)
+        _NLP2CMD_WORKER = _NLP2CMDWorker(_resolve_nlp2cmd_python())
     except Exception:
         _NLP2CMD_WORKER = None
 
@@ -2967,6 +3012,10 @@ def main():
     config = load_config()
     stt_file, stt_only, stt_once, setup, init, tts_provider, tts_voice, tts_stdin, tts_test_flag, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, list_tts, nlp2cmd_parallel, rest = parse_args(sys.argv[1:])
 
+    if (not stt_once) and (not stt_file) and (not rest) and (not tts_stdin) and (not tts_test_flag) and (not setup) and (not init):
+        if sys.stdin.isatty() and (not sys.stdout.isatty()):
+            stt_once = True
+
     # CLI --safe-mode overrides config
     if safe_mode:
         config["safe_mode"] = True
@@ -3078,8 +3127,45 @@ def main():
         shell.run()
         return 0
 
+    bin_name = os.environ.get("STTS_NLP2CMD_BIN", "nlp2cmd")
+    if rest and rest[0] == bin_name and (not sys.stdin.isatty()) and any(a == "stdin" for a in rest[1:]):
+        run_mode = ("-r" in rest) or ("--run" in rest)
+        auto_confirm = ("--auto-confirm" in rest)
+
+        data = ""
+        try:
+            data = sys.stdin.read()
+        except Exception:
+            data = ""
+        lines = [l.strip() for l in (data or "").splitlines() if l.strip()]
+        text = lines[-1] if lines else ""
+        if not text:
+            cprint(Colors.RED, "❌ stdin: brak tekstu")
+            return 1
+
+        nlp2cmd_prewarm(config)
+        translated = nlp2cmd_translate(text, config=config, force=True)
+        if not translated:
+            cprint(Colors.RED, "❌ nlp2cmd: brak wygenerowanej komendy")
+            return 1
+
+        if not auto_confirm:
+            if not nlp2cmd_confirm(translated):
+                return 0
+
+        if not run_mode:
+            print(translated)
+            return 0
+
+        ok, reason = check_command_safety(translated, config, dry_run)
+        if not ok:
+            return 0 if reason == "dry-run" else 1
+        out, code, printed = shell.run_command_any(translated)
+        if out.strip() and not printed:
+            print(out, end="", flush=True)
+        return code
+
     if config.get("nlp2cmd_parallel"):
-        bin_name = os.environ.get("STTS_NLP2CMD_BIN", "nlp2cmd")
         if rest and rest[0] == bin_name and any("{STT}" in a for a in rest):
             run_mode = ("-r" in rest) or ("--run" in rest)
             auto_confirm = ("--auto-confirm" in rest)

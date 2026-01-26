@@ -27,6 +27,7 @@ Najważniejsze zmienne:
 - `STTS_CONFIG_DIR` - gdzie trzymać modele i config (przydatne dla Docker cache)
 - `STTS_TIMEOUT` - czas nagrywania STT (sekundy), domyślnie `5`
 - `STTS_NLP2CMD_ENABLED=1` - włącza NL → komenda przez `nlp2cmd`
+- `STTS_NLP2CMD_PARALLEL=1` - prewarm `nlp2cmd` w tle (mniejsze opóźnienie po STT)
 - `STTS_TTS_VOICE` - głos TTS (np. `pl` dla espeak, `pl_PL-gosia-medium` dla piper)
 - `STTS_NLP2CMD_CONFIRM=1` - zawsze pytaj o potwierdzenie
 - `STTS_STREAM=1` - strumieniuj output komend (bez buforowania)
@@ -113,7 +114,7 @@ nlp2cmd -r "otwórz https://www.prototypowanie.pl/kontakt/ i wypelnij formularz 
 Możesz uruchomić dowolną komendę i wstawić transkrypt z mikrofonu jako `{STT}`:
 
 ```bash
-STTS_NLP2CMD_ENABLED=1 ./stts nlp2cmd -r "{STT}"
+STTS_NLP2CMD_ENABLED=1 STTS_NLP2CMD_PARALLEL=1 ./stts nlp2cmd -r "{STT}" --auto-confirm
 ```
 
 ### Pipeline (jednorazowe STT → stdout)
