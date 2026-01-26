@@ -1518,6 +1518,17 @@ class TextNormalizer:
         if not candidates:
             return None
 
+        try:
+            from rapidfuzz import fuzz as _rf_fuzz  # type: ignore
+            from rapidfuzz import process as _rf_process  # type: ignore
+
+            hit = _rf_process.extractOne(s, candidates, scorer=_rf_fuzz.ratio, score_cutoff=84)
+            if not hit:
+                return None
+            return TextNormalizer.PHONETIC_EN_CORRECTIONS.get(hit[0])
+        except Exception:
+            pass
+
         m = difflib.get_close_matches(s, candidates, n=1, cutoff=0.84)
         if not m:
             return None
@@ -1710,6 +1721,26 @@ class WhisperCppSTT(STTProvider):
             cprint(Colors.RED, f"❌ Download failed: {e}")
             return None
 
+    @staticmethod
+    @functools.lru_cache(maxsize=32)
+    def _detect_prompt_flag(whisper_bin: str) -> Optional[str]:
+        for args in (("--help",), ("-h",), ("-help",)):
+            try:
+                res = subprocess.run(
+                    [whisper_bin, *args],
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                )
+                out = (res.stdout or "") + (res.stderr or "")
+                if "--prompt" in out:
+                    return "--prompt"
+                if re.search(r"(?mi)^\s*-p\b.*prompt", out):
+                    return "-p"
+            except Exception:
+                continue
+        return None
+
     def transcribe(self, audio_path: str) -> str:
         whisper_bin = shutil.which("whisper-cli") or shutil.which("whisper-cpp") or shutil.which("main")
         if not whisper_bin:
@@ -1739,6 +1770,13 @@ class WhisperCppSTT(STTProvider):
         try:
             cmd = [whisper_bin, "-m", str(model_path), "-l", self.language, "-f", audio_path, "-nt"]
             cmd.extend(["-t", str(min(os.cpu_count() or 4, 8))])
+
+            prompt = (self.config.get("stt_prompt") if isinstance(self.config, dict) else None) or os.environ.get("STTS_STT_PROMPT", "")
+            prompt = str(prompt or "").strip()
+            if prompt:
+                flag = self._detect_prompt_flag(str(whisper_bin))
+                if flag in ("--prompt", "-p"):
+                    cmd.extend([flag, prompt])
 
             gpu_layers = 0
             try:
@@ -2375,18 +2413,72 @@ def is_sql_command(cmd: str) -> bool:
     return False
 
 
+def check_command_safety(cmd: str, config: dict, dry_run: bool) -> Tuple[bool, str]:
+    if dry_run:
+        return False, "dry-run"
+    is_dangerous, reason = is_dangerous_command(cmd)
+    if is_dangerous:
+        cprint(Colors.RED, f"🚫 ZABLOKOWANO: {reason}")
+        return False, "dangerous"
+    if config.get("safe_mode", False):
+        if not sys.stdin.isatty():
+            cprint(Colors.YELLOW, "🔒 SAFE MODE (stdin nie jest TTY)")
+            return False, "safe-mode"
+        cprint(Colors.YELLOW, "🔒 SAFE MODE")
+        ans = input("Uruchomić? (y/n): ").strip().lower()
+        if ans != "y":
+            return False, "safe-mode"
+    return True, ""
+
+
 _NLP2CMD_WORKER = None
 
 
 def _resolve_nlp2cmd_python() -> str:
     v = os.environ.get("STTS_NLP2CMD_PYTHON", "").strip()
-    return v or sys.executable
+    if v:
+        return v
+
+    ve = os.environ.get("VIRTUAL_ENV", "").strip()
+    if ve:
+        try:
+            p = Path(ve) / "bin" / "python"
+            if p.exists():
+                return str(p)
+        except Exception:
+            pass
+
+    try:
+        here = Path(__file__).resolve()
+        candidates = [
+            here.parent.parent / "venv" / "bin" / "python",
+            here.parent.parent / "venv" / "bin" / "python3",
+            here.parent / "venv" / "bin" / "python",
+            here.parent / "venv" / "bin" / "python3",
+        ]
+        for c in candidates:
+            if c.exists():
+                return str(c)
+    except Exception:
+        pass
+
+    return sys.executable
 
 
 def nlp2cmd_prewarm(config: Optional[dict] = None) -> None:
     global _NLP2CMD_WORKER
     if not _nlp2cmd_parallel_enabled(config):
         return
+    if _NLP2CMD_WORKER is not None:
+        return
+    try:
+        _NLP2CMD_WORKER = _NLP2CMDWorker(_resolve_nlp2cmd_python())
+    except Exception:
+        _NLP2CMD_WORKER = None
+
+
+def nlp2cmd_prewarm_force() -> None:
+    global _NLP2CMD_WORKER
     if _NLP2CMD_WORKER is not None:
         return
     try:
@@ -2402,7 +2494,13 @@ def nlp2cmd_translate(text: str, config: Optional[dict] = None, force: bool = Fa
 
     text = TextNormalizer.normalize(text or "")
 
-    if _nlp2cmd_parallel_enabled(config):
+    if force:
+        nlp2cmd_prewarm_force()
+        if _NLP2CMD_WORKER is not None:
+            cmd = _NLP2CMD_WORKER.translate(text)
+            if cmd:
+                return cmd
+    elif _nlp2cmd_parallel_enabled(config):
         nlp2cmd_prewarm(config)
         if _NLP2CMD_WORKER is not None:
             cmd = _NLP2CMD_WORKER.translate(text)
@@ -2411,15 +2509,26 @@ def nlp2cmd_translate(text: str, config: Optional[dict] = None, force: bool = Fa
 
     bin_name = os.environ.get("STTS_NLP2CMD_BIN", "nlp2cmd")
     args = shlex.split(os.environ.get("STTS_NLP2CMD_ARGS", "-r"))
-    if not shutil.which(bin_name):
-        cprint(Colors.YELLOW, f"⚠️  {bin_name} nie znaleziony. Zainstaluj: pip install nlp2cmd")
-        return None
     try:
-        res = subprocess.run([bin_name, *args, text], capture_output=True, text=True, timeout=60)
+        cmd = [bin_name, *args, text]
+        if not shutil.which(bin_name):
+            if bin_name == "nlp2cmd":
+                cmd = [_resolve_nlp2cmd_python(), "-m", "nlp2cmd.cli.main", *args, text]
+            else:
+                cprint(Colors.YELLOW, f"⚠️  {bin_name} nie znaleziony. Zainstaluj: pip install nlp2cmd")
+                return None
+
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         out = (res.stdout or "") + (res.stderr or "")
+        if res.returncode != 0 and not out.strip():
+            return None
         lines = [l.strip() for l in out.splitlines() if l.strip()]
         if not lines:
             return None
+
+        for l in lines[:10]:
+            if l.startswith("Traceback"):
+                return None
 
         for l in lines:
             if l.startswith("```"):
@@ -3107,6 +3216,45 @@ def main():
             return 0 if text else 1
         return 1
 
+    if config.get("nlp2cmd_parallel"):
+        bin_name = os.environ.get("STTS_NLP2CMD_BIN", "nlp2cmd")
+        if rest and rest[0] == bin_name and any("{STT}" in a for a in rest):
+            run_mode = ("-r" in rest) or ("--run" in rest)
+            auto_confirm = ("--auto-confirm" in rest)
+
+            nlp2cmd_prewarm(config)
+            if stt_file:
+                text = shell.listen(stt_file=stt_file)
+                if stt_only:
+                    print(text)
+                    return 0 if text else 1
+            else:
+                with contextlib.redirect_stdout(sys.stderr):
+                    text = shell.listen()
+            if not text:
+                return 1
+
+            translated = nlp2cmd_translate(text, config=config, force=True)
+            if not translated:
+                cprint(Colors.RED, "❌ nlp2cmd: brak wygenerowanej komendy")
+                return 1
+
+            if dry_run:
+                print(translated)
+                return 0
+
+            if not auto_confirm:
+                if not nlp2cmd_confirm(translated):
+                    return 0
+
+            ok, reason = check_command_safety(translated, config, dry_run)
+            if not ok:
+                return 0 if reason == "dry-run" else 1
+            out, code, printed = shell.run_command_any(translated)
+            if out.strip() and not printed:
+                print(out, end="", flush=True)
+            return code
+
     if stt_file:
         nlp2cmd_prewarm(config)
         text = shell.listen(stt_file=stt_file)
@@ -3143,19 +3291,23 @@ def main():
             cprint(Colors.RED, "❌ stdin: brak tekstu")
             return 1
 
-        nlp2cmd_prewarm(config)
+        nlp2cmd_prewarm_force()
         translated = nlp2cmd_translate(text, config=config, force=True)
         if not translated:
             cprint(Colors.RED, "❌ nlp2cmd: brak wygenerowanej komendy")
             return 1
 
-        if not auto_confirm:
-            if not nlp2cmd_confirm(translated):
-                return 0
-
         if not run_mode:
             print(translated)
             return 0
+
+        if dry_run:
+            print(translated)
+            return 0
+
+        if not auto_confirm:
+            if not nlp2cmd_confirm(translated):
+                return 0
 
         ok, reason = check_command_safety(translated, config, dry_run)
         if not ok:
@@ -3164,37 +3316,6 @@ def main():
         if out.strip() and not printed:
             print(out, end="", flush=True)
         return code
-
-    if config.get("nlp2cmd_parallel"):
-        if rest and rest[0] == bin_name and any("{STT}" in a for a in rest):
-            run_mode = ("-r" in rest) or ("--run" in rest)
-            auto_confirm = ("--auto-confirm" in rest)
-
-            nlp2cmd_prewarm(config)
-            with contextlib.redirect_stdout(sys.stderr):
-                text = shell.listen()
-            if not text:
-                return 1
-            translated = nlp2cmd_translate(text, config=config, force=True)
-            if not translated:
-                cprint(Colors.RED, "❌ nlp2cmd: brak wygenerowanej komendy")
-                return 1
-
-            if not auto_confirm:
-                if not nlp2cmd_confirm(translated):
-                    return 0
-
-            if not run_mode:
-                print(translated)
-                return 0
-
-            ok, reason = check_command_safety(translated, config, dry_run)
-            if not ok:
-                return 0 if reason == "dry-run" else 1
-            out, code, printed = shell.run_command_any(translated)
-            if out.strip() and not printed:
-                print(out, end="", flush=True)
-            return code
 
     if dry_run:
         # pipeline-friendly: all logs/prompts to stderr; stdout contains ONLY the final command

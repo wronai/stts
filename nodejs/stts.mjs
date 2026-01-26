@@ -27,68 +27,6 @@ import { fileURLToPath } from 'node:url';
 function loadDotenv() {
     const candidates = [];
 
-const PHONETIC_KEYS = Object.keys(PHONETIC_EN_CORRECTIONS);
-const FUZZY_CACHE = new Map();
-
-function levenshteinBounded(a, b, maxDist) {
-    if (a === b) return 0;
-    const al = a.length;
-    const bl = b.length;
-    if (Math.abs(al - bl) > maxDist) return maxDist + 1;
-    if (al === 0) return bl;
-    if (bl === 0) return al;
-
-    let prev = new Array(bl + 1);
-    let cur = new Array(bl + 1);
-    for (let j = 0; j <= bl; j++) prev[j] = j;
-
-    for (let i = 1; i <= al; i++) {
-        cur[0] = i;
-        let rowMin = cur[0];
-        const ca = a.charCodeAt(i - 1);
-        for (let j = 1; j <= bl; j++) {
-            const cost = ca === b.charCodeAt(j - 1) ? 0 : 1;
-            const v = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
-            cur[j] = v;
-            if (v < rowMin) rowMin = v;
-        }
-        if (rowMin > maxDist) return maxDist + 1;
-        const tmp = prev;
-        prev = cur;
-        cur = tmp;
-    }
-    return prev[bl];
-}
-
-function fuzzyPhoneticReplacement(clean) {
-    const s = String(clean || '').trim().toLowerCase();
-    if (!s) return null;
-    if (s.length < 4 || s.length > 18) return null;
-    if (!/^[a-ząćęłńóśźż]+$/i.test(s)) return null;
-    if (s.includes(' ')) return null;
-
-    if (FUZZY_CACHE.has(s)) return FUZZY_CACHE.get(s);
-
-    const maxDist = s.length <= 6 ? 1 : 2;
-    let bestKey = null;
-    let bestDist = maxDist + 1;
-
-    for (const k of PHONETIC_KEYS) {
-        if (k.includes(' ')) continue;
-        if (Math.abs(k.length - s.length) > maxDist) continue;
-        const d = levenshteinBounded(s, k, maxDist);
-        if (d < bestDist) {
-            bestDist = d;
-            bestKey = k;
-            if (bestDist === 0) break;
-        }
-    }
-
-    const out = bestKey && bestDist <= maxDist ? PHONETIC_EN_CORRECTIONS[bestKey] : null;
-    FUZZY_CACHE.set(s, out);
-    if (FUZZY_CACHE.size > 4096) FUZZY_CACHE.clear();
-    return out;
-}
     try {
         const here = dirname(fileURLToPath(import.meta.url));
         candidates.push(join(process.cwd(), '.env'));
@@ -320,6 +258,70 @@ const REGEX_FIXES = [
     [/\bkube?rnitis\b/gi, 'kubernetes'],
 ];
 
+const PHONETIC_KEYS = Object.keys(PHONETIC_EN_CORRECTIONS);
+const FUZZY_CACHE = new Map();
+
+function levenshteinBounded(a, b, maxDist) {
+    if (a === b) return 0;
+    const al = a.length;
+    const bl = b.length;
+    if (Math.abs(al - bl) > maxDist) return maxDist + 1;
+    if (al === 0) return bl;
+    if (bl === 0) return al;
+
+    let prev = new Array(bl + 1);
+    let cur = new Array(bl + 1);
+    for (let j = 0; j <= bl; j++) prev[j] = j;
+
+    for (let i = 1; i <= al; i++) {
+        cur[0] = i;
+        let rowMin = cur[0];
+        const ca = a.charCodeAt(i - 1);
+        for (let j = 1; j <= bl; j++) {
+            const cost = ca === b.charCodeAt(j - 1) ? 0 : 1;
+            const v = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+            cur[j] = v;
+            if (v < rowMin) rowMin = v;
+        }
+        if (rowMin > maxDist) return maxDist + 1;
+        const tmp = prev;
+        prev = cur;
+        cur = tmp;
+    }
+    return prev[bl];
+}
+
+function fuzzyPhoneticReplacement(clean) {
+    const s = String(clean || '').trim().toLowerCase();
+    if (!s) return null;
+    if (s.length < 4 || s.length > 18) return null;
+    if (!/^[a-ząćęłńóśźż]+$/i.test(s)) return null;
+    if (s.includes(' ')) return null;
+
+    if (FUZZY_CACHE.has(s)) return FUZZY_CACHE.get(s);
+
+    const maxDist = s.length <= 6 ? 1 : 2;
+    let bestKey = null;
+    let bestDist = maxDist + 1;
+
+    for (const k of PHONETIC_KEYS) {
+        if (k.includes(' ')) continue;
+        if (k[0] !== s[0]) continue;
+        if (Math.abs(k.length - s.length) > maxDist) continue;
+        const d = levenshteinBounded(s, k, maxDist);
+        if (d < bestDist) {
+            bestDist = d;
+            bestKey = k;
+            if (bestDist === 0) break;
+        }
+    }
+
+    const out = bestKey && bestDist <= maxDist ? PHONETIC_EN_CORRECTIONS[bestKey] : null;
+    FUZZY_CACHE.set(s, out);
+    if (FUZZY_CACHE.size > 4096) FUZZY_CACHE.clear();
+    return out;
+}
+
 function fixPhoneticEnglish(text) {
     const words = text.split(/\s+/);
     const fixed = [];
@@ -535,6 +537,26 @@ function which(cmd) {
     } catch {
         return null;
     }
+}
+
+const PROMPT_FLAG_CACHE = new Map();
+
+function detectPromptFlag(whisperBin) {
+    const bin = String(whisperBin || '').trim();
+    if (!bin) return null;
+    if (PROMPT_FLAG_CACHE.has(bin)) return PROMPT_FLAG_CACHE.get(bin);
+    let out = '';
+    try {
+        out = String(execSync(`"${bin}" --help`, { encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'pipe'] }) || '');
+    } catch (e) {
+        out = String((e && e.stdout) || '') + String((e && e.stderr) || '');
+    }
+    let flag = null;
+    if (out.includes('--prompt')) flag = '--prompt';
+    else if (/^\s*-p\b.*prompt/im.test(out)) flag = '-p';
+    PROMPT_FLAG_CACHE.set(bin, flag);
+    if (PROMPT_FLAG_CACHE.size > 128) PROMPT_FLAG_CACHE.clear();
+    return flag;
 }
 
 function ensureDir(dir) {
@@ -932,8 +954,11 @@ const STT_PROVIDERS = {
                 const ngl = Number.isFinite(Number(gpuLayers)) ? Math.max(0, Math.floor(Number(gpuLayers))) : 0;
                 const gpuBuild = existsSync(join(MODELS_DIR, 'whisper.cpp', '.gpu_build'));
                 const nglArg = ngl > 0 && gpuBuild ? ` -ngl ${ngl}` : '';
+                const prompt = String(process.env.STTS_STT_PROMPT || '').trim();
+                const promptFlag = prompt ? detectPromptFlag(whisperBin) : null;
+                const promptArg = prompt && promptFlag ? ` ${promptFlag} ${JSON.stringify(prompt)}` : '';
                 const result = execSync(
-                    `"${whisperBin}" -m "${modelPath}" -l ${language} -f "${audioPath}" -nt -t ${threads}${nglArg}`,
+                    `"${whisperBin}" -m "${modelPath}" -l ${language} -f "${audioPath}" -nt -t ${threads}${nglArg}${promptArg}`,
                     { encoding: 'utf8', timeout: 120000, stdio: ['pipe', 'pipe', 'pipe'] }
                 );
                 return normalizeSTTText(result.trim(), language);
