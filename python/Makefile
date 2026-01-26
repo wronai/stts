@@ -108,7 +108,7 @@ stt-vosk-pl:
 	@mkdir -p $(CACHE_DIR)/models/vosk
 	@echo "📥 Downloading vosk-model-small-pl-0.22..."
 	@rm -f /tmp/vosk-small-pl.zip
-	@wget -O /tmp/vosk-small-pl.zip \
+	@curl -L -o /tmp/vosk-small-pl.zip \
 		"https://alphacephei.com/vosk/models/vosk-model-small-pl-0.22.zip"
 	@cd $(CACHE_DIR)/models/vosk && unzip -o /tmp/vosk-small-pl.zip
 	@rm -f /tmp/vosk-small-pl.zip

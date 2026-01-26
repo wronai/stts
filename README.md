@@ -250,6 +250,53 @@ Alternatywnie (wrapper shell):
 bash scripts/test_docker_all.sh --cache-python /tmp/stts-python-cache --cache-nodejs /tmp/stts-nodejs-cache
 ```
 
+## E2E examples
+
+Poniżej są przykłady end-to-end, które da się uruchomić lokalnie oraz w CI.
+
+### E2E offline (Docker, bez mikrofonu)
+
+To jest najbardziej powtarzalne (deterministyczne):
+
+- generujemy `samples/*.wav`
+- zapisujemy oczekiwany tekst do `samples/*.wav.txt`
+- ustawiamy `STTS_MOCK_STT=1` (STT czyta sidecar zamiast odpalać model)
+
+```bash
+make docker-test-python
+make docker-test-nodejs
+```
+
+### E2E offline (placeholder / captions loop)
+
+Tryb `--stt-stream-shell` pozwala odpalać w pętli komendę-szablon z podstawieniem `{STT}` / `{STT_STREAM}`.
+W CI/Docker możesz to uruchomić jednorazowo z `--stt-file`:
+
+```bash
+STTS_MOCK_STT=1 ./stts --stt-file python/samples/cmd_echo_hello.wav \
+  --stt-stream-shell --cmd "echo '{STT_STREAM}'" --dry-run
+```
+
+### E2E online (Deepgram, STT provider=deepgram)
+
+Wersja Python ma provider `deepgram` (REST, transkrypcja z pliku WAV).
+
+Wymaga:
+
+- `STTS_DEEPGRAM_KEY=...`
+
+Przykład (tylko transkrypcja):
+
+```bash
+STTS_DEEPGRAM_KEY=sk-... STTS_STT_PROVIDER=deepgram ./stts --stt-file python/samples/cmd_ls.wav --stt-only
+```
+
+Model można ustawić:
+
+```bash
+STTS_DEEPGRAM_KEY=sk-... STTS_STT_PROVIDER=deepgram STTS_DEEPGRAM_MODEL=nova-2 ./stts --stt-file python/samples/cmd_ls.wav --stt-only
+```
+
 ## ✨ Funkcje
 
 - **Auto-detekcja sprzętu** - sprawdza RAM, GPU, CPU i rekomenduje odpowiedni model

@@ -1890,6 +1890,111 @@ class DeepgramSTT(STTProvider):
         return TextNormalizer.normalize(transcript, self.language)
 
 
+class VoskSTT(STTProvider):
+    name = "vosk"
+    description = "Offline, fast, lightweight STT (good for RPi)"
+    min_ram_gb = 0.5
+    models = [
+        ("small-pl", "vosk-model-small-pl-0.22", 0.05),
+        ("small-en", "vosk-model-small-en-us-0.15", 0.04),
+    ]
+
+    @classmethod
+    def is_available(cls, info: SystemInfo):
+        try:
+            import vosk
+            vosk.SetLogLevel(-1)
+        except ImportError:
+            return False, "pip install vosk"
+        # Check if any model exists
+        vosk_dir = MODELS_DIR / "vosk"
+        if vosk_dir.exists():
+            models = list(vosk_dir.glob("vosk-model-*"))
+            if models:
+                return True, f"vosk + {len(models)} model(s)"
+        return False, "vosk installed, no models (make stt-vosk-pl)"
+
+    @classmethod
+    def get_recommended_model(cls, info: SystemInfo) -> Optional[str]:
+        return "small-pl"
+
+    def _find_model_path(self) -> Optional[Path]:
+        """Find vosk model directory."""
+        vosk_dir = MODELS_DIR / "vosk"
+        if not vosk_dir.exists():
+            return None
+
+        # If model is a full path
+        if self.model and Path(self.model).exists():
+            return Path(self.model)
+
+        # Map short names to directory names
+        model_name = self.model or "small-pl"
+        mappings = {
+            "small-pl": "vosk-model-small-pl-0.22",
+            "small-en": "vosk-model-small-en-us-0.15",
+        }
+        dir_name = mappings.get(model_name, model_name)
+
+        # Try exact match
+        model_path = vosk_dir / dir_name
+        if model_path.exists():
+            return model_path
+
+        # Try glob
+        matches = list(vosk_dir.glob(f"*{model_name}*"))
+        if matches:
+            return matches[0]
+
+        # Fallback to first available
+        models = list(vosk_dir.glob("vosk-model-*"))
+        if models:
+            return models[0]
+
+        return None
+
+    def transcribe(self, audio_path: str) -> str:
+        try:
+            import vosk
+            vosk.SetLogLevel(-1)
+        except ImportError:
+            cprint(Colors.RED, "❌ vosk not installed: pip install vosk")
+            return ""
+
+        model_path = self._find_model_path()
+        if not model_path:
+            cprint(Colors.RED, "❌ Vosk model not found. Run: make stt-vosk-pl")
+            return ""
+
+        try:
+            import wave
+            model = vosk.Model(str(model_path))
+
+            wf = wave.open(audio_path, "rb")
+            if wf.getnchannels() != 1 or wf.getsampwidth() != 2:
+                cprint(Colors.YELLOW, "⚠️ Audio must be mono 16-bit WAV")
+                return ""
+
+            rec = vosk.KaldiRecognizer(model, wf.getframerate())
+            rec.SetWords(False)
+
+            while True:
+                data = wf.readframes(4000)
+                if len(data) == 0:
+                    break
+                rec.AcceptWaveform(data)
+
+            result = json.loads(rec.FinalResult())
+            transcript = result.get("text", "").strip()
+            wf.close()
+
+            return TextNormalizer.normalize(transcript, self.language)
+
+        except Exception as e:
+            cprint(Colors.RED, f"❌ Vosk error: {e}")
+            return ""
+
+
 class TTSProvider:
     name: str = "base"
 
@@ -2204,7 +2309,7 @@ class FliteTTS(TTSProvider):
             return
 
 
-STT_PROVIDERS = {"whisper_cpp": WhisperCppSTT, "deepgram": DeepgramSTT}
+STT_PROVIDERS = {"whisper_cpp": WhisperCppSTT, "deepgram": DeepgramSTT, "vosk": VoskSTT}
 TTS_PROVIDERS = {"espeak": EspeakTTS, "piper": PiperTTS, "spd-say": SpdSayTTS, "say": SayTTS, "flite": FliteTTS}
 
 
@@ -2960,6 +3065,13 @@ class VoiceShell:
 
     def run_command_any(self, cmd: str):
         # If pexpect exists, support interactive prompts with TTS + voice reply.
+        def _has_pexpect():
+            try:
+                import pexpect
+                return True
+            except ImportError:
+                return False
+
         if sys.stdin.isatty() and _has_pexpect():
             try:
                 return self.run_command_interactive(cmd)
