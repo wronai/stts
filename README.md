@@ -715,6 +715,8 @@ stts/
 
 - **Python**: `python/README.md` – szczegóły TTS, piper, VAD, audio, CLI
 - **Node.js**: `nodejs/README.md` – szczegóły ESM, Docker, CLI
+- **Docs**: `docs/README.md` – dodatkowe dokumenty (provider STT, testy E2E)
+- **Examples**: `examples/README.md` – gotowe skrypty E2E do uruchomienia
 - **.env**: `.env.example` (root) + `python/.env.example` + `nodejs/.env.example`
 - **Makefile**: `python/Makefile` – targety `tts-setup-espeak`, `tts-setup-piper`
 

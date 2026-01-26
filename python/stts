@@ -3265,6 +3265,8 @@ def parse_args(argv: List[str]):
     stream_cmd = None
     fast_start = None
     stt_gpu_layers = None
+    stt_provider = None
+    stt_model = None
     list_stt = False
     list_tts = False
     nlp2cmd_parallel = None
@@ -3272,7 +3274,11 @@ def parse_args(argv: List[str]):
 
     it = iter(argv)
     for a in it:
-        if a == "--stt-file":
+        if a == "--stt-provider":
+            stt_provider = next(it, None)
+        elif a == "--stt-model":
+            stt_model = next(it, None)
+        elif a == "--stt-file":
             stt_file = next(it, None)
         elif a == "--stt-only":
             stt_only = True
@@ -3328,7 +3334,7 @@ def parse_args(argv: List[str]):
             help_ = True
         else:
             rest.append(a)
-    return stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, list_stt, list_tts, nlp2cmd_parallel, rest
+    return stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, stt_provider, stt_model, list_stt, list_tts, nlp2cmd_parallel, rest
 
 
 def tts_test(shell: "VoiceShell", text: str) -> int:
@@ -3420,7 +3426,13 @@ def expand_placeholders(args: List[str], shell: 'VoiceShell', config: dict, stt_
 
 def main():
     config = load_config()
-    stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test_flag, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, list_stt, list_tts, nlp2cmd_parallel, rest = parse_args(sys.argv[1:])
+    stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test_flag, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, stt_provider_arg, stt_model_arg, list_stt, list_tts, nlp2cmd_parallel, rest = parse_args(sys.argv[1:])
+
+    # Apply CLI overrides for STT provider/model
+    if stt_provider_arg:
+        config["stt_provider"] = stt_provider_arg
+    if stt_model_arg:
+        config["stt_model"] = stt_model_arg
 
     if (not stt_once) and (not stt_file) and (not rest) and (not tts_stdin) and (not tts_test_flag) and (not setup) and (not init):
         if sys.stdin.isatty() and (not sys.stdout.isatty()):
