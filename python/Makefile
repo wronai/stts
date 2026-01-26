@@ -85,6 +85,7 @@ help:
 	@echo ""
 	@echo "Local STT (offline):"
 	@echo "  make stt-vosk-pl      - install Vosk + Polish model (50MB, fast)"
+	@echo "  make stt-vosk-pl-full - install Vosk + full Polish model (bigger, better)"
 	@echo "  make stt-silero       - install Silero STT (torch-based)"
 	@echo "  make stt-whisper-stream - build whisper.cpp streaming mode"
 	@echo ""
