@@ -38,6 +38,7 @@ Najważniejsze zmienne:
 - `STTS_STREAM=1` - strumieniuj output komend (bez buforowania)
 - `STTS_FAST_START=1` - szybszy start (mniej detekcji sprzętu)
 - `STTS_STT_GPU_LAYERS=35` - whisper.cpp: liczba warstw na GPU (`-ngl`, wymaga build GPU)
+- `STTS_STT_PROMPT=...` - whisper.cpp: prompt (jeśli binarka wspiera `--prompt` / `-p`)
 - `STTS_GPU_ENABLED=1` - wymuś budowę whisper.cpp z CUDA przy instalacji
 
 ## Przydatne opcje CLI

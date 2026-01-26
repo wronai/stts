@@ -2358,20 +2358,44 @@ def interactive_setup() -> dict:
     cprint(Colors.BOLD + Colors.CYAN, "\nSTTS (python) - Setup\n")
     print(f"OS={info.os_name} RAM={info.ram_gb}GB GPU={info.gpu_name or 'none'}")
 
-    stt_cls = WhisperCppSTT
-    available, reason = stt_cls.is_available(info)
-    print(f"STT: {stt_cls.name} ({reason})")
-    if not available:
-        if input("Install whisper.cpp now? (y/n): ").strip().lower() == "y":
-            stt_cls.install(info)
+    stt_choices: List[Tuple[str, STTProvider]] = []
+    for key, cls in sorted(STT_PROVIDERS.items(), key=lambda kv: kv[0]):
+        try:
+            ok, reason = cls.is_available(info)
+        except Exception:
+            ok, reason = False, "error"
+        stt_choices.append((key, cls))
+        state = "OK" if ok else reason
+        print(f"  {len(stt_choices)}) {key} ({state})")
 
-    rec = stt_cls.get_recommended_model(info)
-    model = input(f"Whisper model [tiny/base/small/medium/large] (ENTER={rec}): ").strip() or rec
-    config["stt_provider"] = "whisper_cpp"
-    config["stt_model"] = model
+    stt_sel = input(f"Wybierz STT [1-{len(stt_choices)}] (ENTER=1): ").strip() or "1"
+    try:
+        idx = int(stt_sel)
+    except ValueError:
+        idx = 1
+    if idx < 1 or idx > len(stt_choices):
+        idx = 1
 
-    if input(f"Download model {model} now? (y/n): ").strip().lower() == "y":
-        stt_cls.download_model(model)
+    stt_key, stt_cls = stt_choices[idx - 1]
+    config["stt_provider"] = stt_key
+
+    if stt_key == "whisper_cpp":
+        available, reason = stt_cls.is_available(info)
+        print(f"STT: {stt_cls.name} ({reason})")
+        if not available:
+            if input("Install whisper.cpp now? (y/n): ").strip().lower() == "y":
+                stt_cls.install(info)
+
+        rec = stt_cls.get_recommended_model(info)
+        model = input(f"Whisper model [tiny/base/small/medium/large] (ENTER={rec}): ").strip() or rec
+        config["stt_model"] = model
+
+        if input(f"Download model {model} now? (y/n): ").strip().lower() == "y":
+            stt_cls.download_model(model)
+    else:
+        rec = (stt_cls.get_recommended_model(info) or config.get("stt_model") or "").strip() or "nova-2"
+        model = input(f"STT model (ENTER={rec}): ").strip() or rec
+        config["stt_model"] = model
 
     tts_choices: List[Tuple[str, TTSProvider]] = []
     for key, cls in (
@@ -3129,6 +3153,7 @@ def parse_args(argv: List[str]):
     stream_cmd = None
     fast_start = None
     stt_gpu_layers = None
+    list_stt = False
     list_tts = False
     nlp2cmd_parallel = None
     rest: List[str] = []
@@ -3183,13 +3208,15 @@ def parse_args(argv: List[str]):
             nlp2cmd_parallel = True
         elif a == "--no-nlp2cmd-parallel":
             nlp2cmd_parallel = False
+        elif a == "--list-stt":
+            list_stt = True
         elif a == "--list-tts":
             list_tts = True
         elif a in ("--help", "-h"):
             help_ = True
         else:
             rest.append(a)
-    return stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, list_tts, nlp2cmd_parallel, rest
+    return stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, list_stt, list_tts, nlp2cmd_parallel, rest
 
 
 def tts_test(shell: "VoiceShell", text: str) -> int:
@@ -3281,7 +3308,7 @@ def expand_placeholders(args: List[str], shell: 'VoiceShell', config: dict) -> O
 
 def main():
     config = load_config()
-    stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test_flag, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, list_tts, nlp2cmd_parallel, rest = parse_args(sys.argv[1:])
+    stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test_flag, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, list_stt, list_tts, nlp2cmd_parallel, rest = parse_args(sys.argv[1:])
 
     if (not stt_once) and (not stt_file) and (not rest) and (not tts_stdin) and (not tts_test_flag) and (not setup) and (not init):
         if sys.stdin.isatty() and (not sys.stdout.isatty()):
@@ -3313,6 +3340,7 @@ def main():
         print("  --fast-start / --full-start Szybszy start (mniej detekcji sprzętu)")
         print("\nGPU (STT / whisper.cpp):")
         print("  --stt-gpu-layers N         Liczba warstw na GPU (-ngl), wymaga build GPU")
+        print("  --list-stt                 Lista dostępnych providerów STT")
         print("  --list-tts                 Lista dostępnych providerów TTS")
         print("\nTryby pipeline:")
         print("  --tts-stdin    Czytaj stdin i przeczytaj na głos ostatnią niepustą linię")
@@ -3327,8 +3355,21 @@ def main():
         print("  STTS_STREAM=1          Domyślnie strumieniuj output komend")
         print("  STTS_FAST_START=1      Domyślnie szybki start (mniej detekcji)")
         print("  STTS_STT_GPU_LAYERS=35  whisper.cpp: liczba warstw na GPU (-ngl)")
+        print("  STTS_STT_PROMPT=...    whisper.cpp: prompt (jeśli binarka wspiera --prompt/-p)")
+        print("  STTS_DEEPGRAM_KEY=...  Deepgram API key (dla STT provider=deepgram)")
+        print("  STTS_DEEPGRAM_MODEL=... Deepgram model (np. nova-2)")
         print("  STTS_PIPER_AUTO_INSTALL=1  Auto-install piper binarki (local)")
         print("  STTS_PIPER_AUTO_DOWNLOAD=1 Auto-download modelu piper dla tts_voice")
+        return 0
+
+    if list_stt:
+        info = detect_system(fast=True)
+        for k, cls in sorted(STT_PROVIDERS.items(), key=lambda kv: kv[0]):
+            try:
+                ok, reason = cls.is_available(info)
+            except Exception:
+                ok, reason = False, "error"
+            print(f"{k}: {'ok' if ok else 'no'} ({reason})")
         return 0
 
     if list_tts:

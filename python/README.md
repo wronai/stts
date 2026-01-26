@@ -33,7 +33,27 @@ Najważniejsze zmienne:
 - `STTS_STREAM=1` - strumieniuj output komend (bez buforowania)
 - `STTS_FAST_START=1` - szybszy start (mniej detekcji sprzętu)
 - `STTS_STT_GPU_LAYERS=35` - whisper.cpp: liczba warstw na GPU (`-ngl`, wymaga build GPU)
+- `STTS_STT_PROMPT=...` - whisper.cpp: prompt (jeśli binarka wspiera `--prompt` / `-p`)
 - `STTS_GPU_ENABLED=1` - wymuś budowę whisper.cpp z CUDA przy instalacji
+
+### Deepgram (online STT)
+
+Możesz użyć Deepgram jako providera STT (transkrypcja WAV przez REST API).
+
+Wymaga ustawienia klucza API:
+
+- `STTS_STT_PROVIDER=deepgram`
+- `STTS_DEEPGRAM_KEY=...`
+- (opcjonalnie) `STTS_DEEPGRAM_MODEL=nova-2`
+
+Przykład:
+
+```bash
+STTS_STT_PROVIDER=deepgram \
+STTS_DEEPGRAM_KEY="sk_..." \
+STTS_LANGUAGE=pl \
+./stts --stt-file samples/cmd_make_build.wav --stt-only
+```
 
 ## TTS: szybki setup + autodiagnostyka
 
