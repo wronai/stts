@@ -78,6 +78,7 @@ const DEFAULT_CONFIG = {
     auto_tts: true,
     stream_cmd: false,
     fast_start: true,
+    nlp2cmd_parallel: false,
 };
 
 function applyEnvOverrides(config) {
@@ -116,6 +117,10 @@ function applyEnvOverrides(config) {
     if (process.env.STTS_FAST_START) {
         const v = String(process.env.STTS_FAST_START).trim().toLowerCase();
         config.fast_start = !['0', 'false', 'no', 'n'].includes(v);
+    }
+    if (process.env.STTS_NLP2CMD_PARALLEL) {
+        const v = String(process.env.STTS_NLP2CMD_PARALLEL).trim().toLowerCase();
+        config.nlp2cmd_parallel = !['0', 'false', 'no', 'n'].includes(v);
     }
     return config;
 }
@@ -310,6 +315,8 @@ function nlp2cmdTranslate(text) {
     const enabled = String(process.env.STTS_NLP2CMD_ENABLED || '0').trim().toLowerCase();
     if (!['1', 'true', 'yes', 'y'].includes(enabled)) return null;
 
+    text = normalizeSTTText(text || '', process.env.STTS_LANGUAGE || 'pl');
+ 
     const bin = process.env.STTS_NLP2CMD_BIN || 'nlp2cmd';
     const args = (process.env.STTS_NLP2CMD_ARGS || '-r').split(/\s+/).filter(Boolean);
 
@@ -745,7 +752,7 @@ const STT_PROVIDERS = {
                     `"${whisperBin}" -m "${modelPath}" -l ${language} -f "${audioPath}" -nt -t ${threads}${nglArg}`,
                     { encoding: 'utf8', timeout: 120000, stdio: ['pipe', 'pipe', 'pipe'] }
                 );
-                return result.trim();
+                return normalizeSTTText(result.trim(), language);
             } catch (e) {
                 cprint(Colors.RED, `❌ Transcription error: ${e.message}`);
                 return '';
@@ -1079,7 +1086,7 @@ async function voiceShell(config) {
                     prompt();
                     return;
                 }
-                const translated = nlp2cmdTranslate(nl);
+                const translated = nlp2cmdTranslate(cmd);
                 if (!translated || !nlp2cmdConfirm(translated)) {
                     prompt();
                     return;
@@ -1134,6 +1141,7 @@ function parseArgs(argv) {
     let listTts = false;
     let ttsProvider = null;
     let ttsVoice = null;
+    let nlp2cmdParallel = null;
     const rest = [];
 
     for (let i = 0; i < argv.length; i++) {
@@ -1157,6 +1165,10 @@ function parseArgs(argv) {
             const n = Number(argv[i + 1]);
             sttGpuLayers = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
             i++;
+        } else if (a === '--nlp2cmd-parallel') {
+            nlp2cmdParallel = true;
+        } else if (a === '--no-nlp2cmd-parallel') {
+            nlp2cmdParallel = false;
         } else if (a === '--list-tts') {
             listTts = true;
         } else if (a === '--tts-provider') {
@@ -1172,18 +1184,19 @@ function parseArgs(argv) {
         }
     }
 
-    return { sttFile, sttOnly, setup, help, streamCmd, fastStart, sttGpuLayers, listTts, ttsProvider, ttsVoice, rest };
+    return { sttFile, sttOnly, setup, help, streamCmd, fastStart, sttGpuLayers, listTts, ttsProvider, ttsVoice, nlp2cmdParallel, rest };
 }
 
 async function main() {
     let config = loadConfig();
-    const { sttFile, sttOnly, setup, help, streamCmd, fastStart, sttGpuLayers, listTts, ttsProvider, ttsVoice, rest } = parseArgs(process.argv.slice(2));
+    const { sttFile, sttOnly, setup, help, streamCmd, fastStart, sttGpuLayers, listTts, ttsProvider, ttsVoice, nlp2cmdParallel, rest } = parseArgs(process.argv.slice(2));
 
     if (streamCmd !== null) config.stream_cmd = !!streamCmd;
     if (fastStart !== null) config.fast_start = !!fastStart;
     if (sttGpuLayers !== null) config.stt_gpu_layers = Number(sttGpuLayers) || 0;
     if (ttsProvider !== null) config.tts_provider = String(ttsProvider).trim() || null;
     if (ttsVoice !== null) config.tts_voice = String(ttsVoice).trim() || config.tts_voice;
+    if (nlp2cmdParallel !== null) config.nlp2cmd_parallel = !!nlp2cmdParallel;
 
     if (help) {
         console.log(`${readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(0, 14).join('\n')}\n`);
@@ -1194,6 +1207,7 @@ async function main() {
         console.log('  --stream/--no-stream  stream command output (no buffering)');
         console.log('  --fast-start/--full-start  faster startup / full detection');
         console.log('  --stt-gpu-layers N   whisper.cpp: offload N layers to GPU (-ngl)');
+        console.log('  --nlp2cmd-parallel/--no-nlp2cmd-parallel  prewarm nlp2cmd worker');
         console.log('  --tts-provider NAME  set TTS provider (espeak/piper/spd-say/flite/say)');
         console.log('  --tts-voice VALUE    set TTS voice/lang');
         console.log('  --list-tts           list available TTS providers');
@@ -1223,7 +1237,7 @@ async function main() {
         config = await interactiveSetup();
     }
 
-    if (ttsProvider !== null || ttsVoice !== null || streamCmd !== null || fastStart !== null) {
+    if (ttsProvider !== null || ttsVoice !== null || streamCmd !== null || fastStart !== null || nlp2cmdParallel !== null) {
         saveConfig(config);
     }
 
@@ -1245,6 +1259,33 @@ async function main() {
     if (rest.length === 0) {
         await voiceShell(config);
         return;
+    }
+
+    if (nlp2cmdParallelEnabled(config)) {
+        const bin = process.env.STTS_NLP2CMD_BIN || 'nlp2cmd';
+        if (rest[0] === bin && rest.some((a) => String(a || '').includes('{STT}'))) {
+            const runMode = rest.includes('-r') || rest.includes('--run');
+            const autoConfirm = rest.includes('--auto-confirm');
+
+            const shellText = await listen(config);
+            if (!shellText) process.exit(1);
+
+            const translated = nlp2cmdTranslate(shellText);
+            if (!translated) process.exit(1);
+
+            if (!autoConfirm) {
+                if (!nlp2cmdConfirm(translated)) process.exit(0);
+            }
+
+            if (!runMode) {
+                console.log(translated);
+                process.exit(0);
+            }
+
+            const { output, code, printed } = await runCommand(translated, { stream: !!config.stream_cmd });
+            if (!printed && output.trim()) console.log(output);
+            process.exit(code);
+        }
     }
 
     const cmd = rest.join(' ');
