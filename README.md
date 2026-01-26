@@ -520,6 +520,8 @@ nlp2cmd service --auto-execute --host 0.0.0.0 --port 8008
 # Terminal 2: uruchom stts daemon
 ./stts --daemon --nlp2cmd-url http://localhost:8008
 ./stts --daemon --nlp2cmd-url http://localhost:8008 --stt-provider vosk --stt-model pl
+./stts --daemon --nlp2cmd-url http://localhost:8008 --wake-word "hejken" --stt-provider vosk --stt-model pl
+./stts --daemon --nlp2cmd-url http://localhost:8008 --wake-word "hej" --timeout 8 --vad-silence-ms 1200 --stt-provider vosk --stt-model pl
 ```
 
 Lepsza jakość STT (polecane offline): `whisper_cpp` + większy model (np. `medium`):
@@ -550,8 +552,13 @@ Mów do mikrofonu:
 | `--nlp2cmd-url` | URL | URL serwisu nlp2cmd | `--nlp2cmd-url http://localhost:8008` |
 | `--daemon-log` | FILE | Zapisz logi do pliku | `--daemon-log /tmp/stts.log` |
 | `--no-execute` | - | Tylko tłumacz (nie wykonuj komend) | `--no-execute` |
+| `--trigger` | SPEC | Trigger: `fraza=CMD` lub `/regex/=CMD` (omija nlp2cmd) | `--trigger "pokaż procesy=ps aux"` |
+| `--triggers-file` | FILE | Plik z triggerami (linia: `fraza=CMD` lub `/regex/=CMD`) | `--triggers-file triggers.txt` |
+| `--wake-word` | PHRASE | Ustaw jedną frazę wake-word (bez wariantów/fonetyki) | `--wake-word "hejken"` |
 | `--stt-provider` | NAME | Provider STT | `--stt-provider whisper_cpp` |
 | `--stt-model` | VALUE | Model STT | `--stt-model medium` |
+| `--timeout` | SECONDS | Maksymalny czas nagrania (mic/VAD) | `--timeout 12` |
+| `--vad-silence-ms` | MS | Cisza potrzebna do zakończenia wypowiedzi (VAD) | `--vad-silence-ms 1200` |
 | `--tts-provider` | NAME | Provider TTS | `--tts-provider piper` |
 | `--tts-voice` | VOICE | Głos TTS | `--tts-voice pl_PL-gosia-medium` |
 | `--stt-file` | FILE | Transkrybuj plik WAV (zamiast mikrofonu) | `--stt-file audio.wav` |
@@ -581,6 +588,29 @@ Mów do mikrofonu:
 # Daemon mode z Whisper.cpp (lepsza jakość):
 ./stts --daemon --nlp2cmd-url http://localhost:8008 --stt-provider whisper_cpp --stt-model medium
 
+# Daemon mode: ustaw jedną frazę wake-word (tylko "hejken", bez "ken/kan" itd.)
+./stts --daemon --nlp2cmd-url http://localhost:8008 --wake-word "hejken"
+
+# Daemon mode: dłuższe wypowiedzi (domyślnie nagrywa max 5s)
+./stts --daemon --nlp2cmd-url http://localhost:8008 --timeout 12 --vad-silence-ms 1200
+
+# Alternatywnie: przez zmienną środowiskową
+export STTS_WAKE_WORD="hejken"
+./stts --daemon --nlp2cmd-url http://localhost:8008
+
+# Daemon mode: triggery (fraza -> komenda). Jeśli trigger pasuje, stts wykona komendę bez nlp2cmd.
+./stts --daemon --nlp2cmd-url http://localhost:8008 \
+  --trigger "pokaż procesy=ps aux" \
+  --trigger "/(lista|pokaż) folder(ów|y)/=ls -la"
+
+# Daemon mode: triggery z pliku
+cat > triggers.txt <<'EOF'
+# format: fraza=CMD lub /regex/=CMD
+pokaż procesy=ps aux
+/^otwórz przeglądarkę/=xdg-open https://example.com
+EOF
+./stts --daemon --nlp2cmd-url http://localhost:8008 --triggers-file triggers.txt
+
 # Jednorazowe STT z pliku:
 ./stts --stt-file audio.wav --stt-only
 
@@ -608,6 +638,7 @@ Mów do mikrofonu:
 | `PICOVOICE_ACCESS_KEY` | Picovoice API key | `...` |
 | `STTS_VAD_ENABLED` | Włącz VAD | `1` |
 | `STTS_VAD_SILENCE_MS` | Czas ciszy do stop (ms) | `800` |
+| `STTS_TIMEOUT` | Maksymalny czas nagrania (sekundy) | `12` |
 | `STTS_TTS_NO_PLAY` | Nie odtwarzaj audio (CI) | `1` |
 | `STTS_SAFE_MODE` | Tryb bezpieczny | `1` |
 | `STTS_FAST_START` | Szybszy start | `1` |

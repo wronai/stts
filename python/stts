@@ -3418,7 +3418,7 @@ WAKE_WORD_PATTERNS = [
 ]
 
 
-def check_wake_word(text: str) -> Tuple[bool, str]:
+def check_wake_word(text: str, patterns: Optional[List[str]] = None) -> Tuple[bool, str]:
     """Check if text starts with wake word. Returns (matched, remaining_text)."""
     if not text:
         return False, ""
@@ -3426,7 +3426,8 @@ def check_wake_word(text: str) -> Tuple[bool, str]:
     # Make matching robust by allowing an optional non-word prefix and removing
     # the wake-word via regex substitution on the original text.
     src = str(text)
-    for pattern in WAKE_WORD_PATTERNS:
+    pats = list(patterns or WAKE_WORD_PATTERNS)
+    for pattern in pats:
         pat = str(pattern or "")
         if pat.startswith("^"):
             pat = pat[1:]
@@ -3437,6 +3438,19 @@ def check_wake_word(text: str) -> Tuple[bool, str]:
             remaining = remaining.strip(" \t\r\n,:;.!?\"'“”‘’—-")
             return True, remaining.strip()
     return False, src
+
+
+def _wake_word_phrase_to_pattern(phrase: str) -> Optional[str]:
+    p = str(phrase or "").strip()
+    if not p:
+        return None
+    # Convert literal phrase into regex that tolerates punctuation/extra spaces between words.
+    parts = [re.escape(x) for x in re.split(r"\s+", p) if x]
+    if not parts:
+        return None
+    if len(parts) == 1:
+        return r"^" + parts[0] + r"\b"
+    return r"^" + r"\W*".join(parts) + r"\b"
 
 
 def normalize_daemon_command(text: str) -> str:
@@ -3648,7 +3662,11 @@ class VoiceShell:
         if text:
             shown = text
             if self._suppress_wake_word_logging:
-                matched, remaining = check_wake_word(text)
+                # In daemon mode, optionally use custom wake word patterns
+                pats = self.config.get("daemon_wake_patterns") if isinstance(self.config, dict) else None
+                if not isinstance(pats, list):
+                    pats = None
+                matched, remaining = check_wake_word(text, patterns=pats)
                 if matched and remaining:
                     shown = remaining
             cprint(Colors.GREEN, f"✅ \"{shown}\" ({elapsed:.1f}s)")
@@ -3925,6 +3943,8 @@ class VoiceShell:
         nlp2cmd_url: str = "http://localhost:8000",
         execute: bool = True,
         log_file: Optional[str] = None,
+        triggers: Optional[List[Tuple[str, str, bool]]] = None,
+        wake_word: Optional[str] = None,
     ) -> int:
         """Run in daemon mode: continuous wake-word listening + nlp2cmd service."""
         import datetime
@@ -3940,10 +3960,22 @@ class VoiceShell:
                 except Exception:
                     pass
 
-        cprint(Colors.BOLD + Colors.CYAN, "\n🎙️  STTS Daemon Mode (wake-word: hejken)\n")
+        ww = (wake_word or "hejken").strip() or "hejken"
+        cprint(Colors.BOLD + Colors.CYAN, f"\n🎙️  STTS Daemon Mode (wake-word: {ww})\n")
         log(f"nlp2cmd service: {nlp2cmd_url}")
         log(f"execute commands: {execute}")
-        log("Say 'hejken <command>' to execute. Ctrl+C to stop.")
+        log(f"Say '{ww} <command>' to execute. Ctrl+C to stop.")
+
+        rules = list(triggers or [])
+        if rules:
+            log(f"triggers loaded: {len(rules)}")
+
+        wake_patterns: Optional[List[str]] = None
+        if wake_word:
+            pat = _wake_word_phrase_to_pattern(ww)
+            if pat:
+                wake_patterns = [pat]
+                log(f"wake-word: {ww}")
 
         log("🔎 Checking nlp2cmd /health ...")
         if not nlp2cmd_service_health(nlp2cmd_url, timeout=2.5):
@@ -3957,7 +3989,7 @@ class VoiceShell:
             return 2
 
         if self.tts and self.config.get("startup_tts", True):
-            self.speak("Słucham. Powiedz hejken i wydaj polecenie.")
+            self.speak(f"Słucham. Powiedz {ww} i wydaj polecenie.")
 
         self._suppress_wake_word_logging = True
 
@@ -3973,7 +4005,7 @@ class VoiceShell:
                 log(f"📝 Heard: {text}")
 
                 # Check for wake word
-                matched, remaining = check_wake_word(text)
+                matched, remaining = check_wake_word(text, patterns=wake_patterns)
 
                 if not matched:
                     log("⏭️  No wake word, ignoring")
@@ -3997,6 +4029,21 @@ class VoiceShell:
 
                 if not remaining:
                     log("❌ Empty command after normalization")
+                    continue
+
+                # Triggers: if matched, execute local command without calling nlp2cmd
+                trig_cmd = match_trigger(remaining, rules)
+                if trig_cmd:
+                    log(f"⚡ Trigger matched -> {trig_cmd}")
+                    ok, reason = check_command_safety(trig_cmd, self.config, dry_run=False)
+                    if not ok:
+                        log(f"🚫 Trigger blocked: {reason}")
+                        continue
+                    out, code, printed = self.run_command_any(trig_cmd)
+                    if out.strip() and not printed:
+                        print(out)
+                    if code != 0:
+                        log(f"❌ Exit code: {code}")
                     continue
 
                 # Hint domain for nlp2cmd service (service may ignore 'dsl' field and rely on text detection)
@@ -4035,20 +4082,50 @@ class VoiceShell:
                 exec_result = result.get("execution_result")
                 if exec_result:
                     if exec_result.get("success"):
-                        stdout = exec_result.get("stdout", "")
-                        log(f"📤 Output: {stdout[:200]}")
+                        exit_code = exec_result.get("exit_code")
+                        duration_ms = exec_result.get("duration_ms")
+                        log(f"🏁 Executed by nlp2cmd service (exit_code={exit_code}, duration_ms={duration_ms})")
+
+                        stdout = exec_result.get("stdout", "") or ""
+                        stderr = exec_result.get("stderr", "") or ""
+
+                        if stdout:
+                            try:
+                                print(stdout, end="" if stdout.endswith("\n") else "\n", flush=True)
+                            except Exception:
+                                pass
+                        if stderr:
+                            try:
+                                print(stderr, end="" if stderr.endswith("\n") else "\n", file=sys.stderr, flush=True)
+                            except Exception:
+                                pass
+
                         if stdout.strip() and self.tts:
                             lines = [l.strip() for l in stdout.splitlines() if l.strip()]
                             if lines:
                                 self.speak(lines[-1][:100])
                     else:
-                        stderr = exec_result.get("stderr", "")
-                        log(f"❌ Execution failed: {stderr[:100]}")
+                        exit_code = exec_result.get("exit_code")
+                        duration_ms = exec_result.get("duration_ms")
+                        stderr = exec_result.get("stderr", "") or ""
+                        stdout = exec_result.get("stdout", "") or ""
+
+                        log(f"❌ Execution failed in nlp2cmd service (exit_code={exit_code}, duration_ms={duration_ms})")
+                        if stdout:
+                            try:
+                                print(stdout, end="" if stdout.endswith("\n") else "\n", flush=True)
+                            except Exception:
+                                pass
+                        if stderr:
+                            try:
+                                print(stderr, end="" if stderr.endswith("\n") else "\n", file=sys.stderr, flush=True)
+                            except Exception:
+                                pass
                         if self.tts:
                             self.speak("Komenda nie powiodła się")
                 else:
                     # Execute locally if not executed by service
-                    log(f"▶️  Executing locally: {cmd}")
+                    log(f"▶️  Executing locally (nlp2cmd returned only translation): {cmd}")
                     out, code, _ = self.run_command_any(cmd)
                     if out.strip():
                         print(out, flush=True)
@@ -4092,6 +4169,8 @@ def parse_args(argv: List[str]):
     stt_gpu_layers = None
     stt_provider = None
     stt_model = None
+    timeout_s = None
+    vad_silence_ms = None
     list_stt = False
     list_tts = False
     nlp2cmd_parallel = None
@@ -4101,6 +4180,7 @@ def parse_args(argv: List[str]):
     daemon_no_execute = False
     daemon_triggers: List[str] = []
     daemon_triggers_file = None
+    daemon_wake_word = None
     rest: List[str] = []
 
     it = iter(argv)
@@ -4109,6 +4189,16 @@ def parse_args(argv: List[str]):
             stt_provider = next(it, None)
         elif a == "--stt-model":
             stt_model = next(it, None)
+        elif a == "--timeout":
+            try:
+                timeout_s = float((next(it, None) or "").strip())
+            except Exception:
+                timeout_s = None
+        elif a == "--vad-silence-ms":
+            try:
+                vad_silence_ms = int((next(it, None) or "").strip())
+            except Exception:
+                vad_silence_ms = None
         elif a == "--stt-file":
             stt_file = next(it, None)
         elif a == "--stt-only":
@@ -4175,11 +4265,13 @@ def parse_args(argv: List[str]):
                 daemon_triggers.append(v)
         elif a == "--triggers-file":
             daemon_triggers_file = next(it, None)
+        elif a == "--wake-word":
+            daemon_wake_word = next(it, None)
         elif a in ("--help", "-h"):
             help_ = True
         else:
             rest.append(a)
-    return stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, stt_provider, stt_model, list_stt, list_tts, nlp2cmd_parallel, daemon_mode, nlp2cmd_url, daemon_log, daemon_no_execute, daemon_triggers, daemon_triggers_file, rest
+    return stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, stt_provider, stt_model, timeout_s, vad_silence_ms, list_stt, list_tts, nlp2cmd_parallel, daemon_mode, nlp2cmd_url, daemon_log, daemon_no_execute, daemon_triggers, daemon_triggers_file, daemon_wake_word, rest
 
 
 def tts_test(shell: "VoiceShell", text: str) -> int:
@@ -4305,7 +4397,7 @@ def expand_placeholders(args: List[str], shell: 'VoiceShell', config: dict, stt_
 
 def main():
     config = load_config()
-    stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test_flag, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, stt_provider_arg, stt_model_arg, list_stt, list_tts, nlp2cmd_parallel, daemon_mode, nlp2cmd_url, daemon_log, daemon_no_execute, rest = parse_args(sys.argv[1:])
+    stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test_flag, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, stt_provider_arg, stt_model_arg, timeout_s, vad_silence_ms, list_stt, list_tts, nlp2cmd_parallel, daemon_mode, nlp2cmd_url, daemon_log, daemon_no_execute, daemon_triggers, daemon_triggers_file, daemon_wake_word, rest = parse_args(sys.argv[1:])
 
     # Apply CLI overrides for STT provider/model
     if stt_provider_arg:
@@ -4330,6 +4422,17 @@ def main():
     if nlp2cmd_parallel is not None:
         config["nlp2cmd_parallel"] = bool(nlp2cmd_parallel)
 
+    if timeout_s is not None:
+        try:
+            config["timeout"] = float(timeout_s)
+        except Exception:
+            pass
+    if vad_silence_ms is not None:
+        try:
+            config["vad_silence_ms"] = int(vad_silence_ms)
+        except Exception:
+            pass
+
     if help_:
         print(__doc__)
         print("\nOpcje bezpieczeństwa:")
@@ -4344,6 +4447,9 @@ def main():
         print("\nSzybkość / interaktywność:")
         print("  --stream / --no-stream     Strumieniuj output komendy (bez buforowania)")
         print("  --fast-start / --full-start Szybszy start (mniej detekcji sprzętu)")
+        print("\nNagrywanie (mic/VAD):")
+        print("  --timeout SECONDS      Maksymalny czas nagrania (domyślnie 5s)")
+        print("  --vad-silence-ms MS     Czas ciszy do potwierdzenia końca wypowiedzi (ms)")
         print("\nGPU (STT / whisper.cpp):")
         print("  --stt-gpu-layers N         Liczba warstw na GPU (-ngl), wymaga build GPU")
         print("  --list-stt                 Lista dostępnych providerów STT")
@@ -4371,6 +4477,9 @@ def main():
         print("  --nlp2cmd-url URL      URL serwisu nlp2cmd (domyślnie: http://localhost:8000)")
         print("  --daemon-log FILE      Zapisz logi do pliku")
         print("  --no-execute           Tylko tłumacz (nie wykonuj komend)")
+        print("  --trigger SPEC         Trigger: fraza=CMD lub /regex/=CMD (omija nlp2cmd)")
+        print("  --triggers-file FILE   Plik z triggerami (linia: fraza=CMD lub /regex/=CMD)")
+        print("  --wake-word PHRASE     Ustaw jedną frazę wake-word (np. 'hejken'), bez wariantów")
         print("\nPrzykład uruchomienia:")
         print("  # Terminal 1: nlp2cmd service")
         print("  nlp2cmd service --host 0.0.0.0 --port 8000")
@@ -4433,10 +4542,18 @@ def main():
     if daemon_mode:
         url = nlp2cmd_url or os.environ.get("STTS_NLP2CMD_URL", "http://localhost:8000")
         execute = not daemon_no_execute
+        rules = load_triggers(daemon_triggers, daemon_triggers_file)
+        wake_word = (daemon_wake_word or os.environ.get("STTS_WAKE_WORD", "")).strip() or None
+        if wake_word:
+            pat = _wake_word_phrase_to_pattern(wake_word)
+            if pat:
+                config["daemon_wake_patterns"] = [pat]
         code = shell.run_daemon(
             nlp2cmd_url=url,
             execute=execute,
             log_file=daemon_log,
+            triggers=rules,
+            wake_word=wake_word,
         )
         return int(code or 0)
 
