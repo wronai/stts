@@ -3275,7 +3275,7 @@ def quick_init(init: str) -> dict:
     return cfg
 
 
-def expand_placeholders(args: List[str], shell: 'VoiceShell', config: dict) -> Optional[List[str]]:
+def expand_placeholders(args: List[str], shell: 'VoiceShell', config: dict, stt_file: Optional[str] = None) -> Optional[List[str]]:
     """Expand placeholders like {STT} in command arguments."""
     expanded = []
     stt_used = False
@@ -3286,7 +3286,7 @@ def expand_placeholders(args: List[str], shell: 'VoiceShell', config: dict) -> O
         stt_used = True
         # Listen for speech input
         with contextlib.redirect_stdout(sys.stderr):
-            text = shell.listen()
+            text = shell.listen(stt_file=stt_file) if stt_file else shell.listen()
         if not text:
             cprint(Colors.RED, "❌ No speech input captured")
             return None
@@ -3475,7 +3475,7 @@ def main():
     if stt_once:
         # Pipeline-friendly mode: transcript to stdout, all prompts/status to stderr
         with contextlib.redirect_stdout(sys.stderr):
-            text = shell.listen()
+            text = shell.listen(stt_file=stt_file) if stt_file else shell.listen()
         if text:
             print(text)
             return 0 if text else 1
@@ -3521,6 +3521,37 @@ def main():
             return code
 
     if stt_file:
+        # When user provides an explicit command template with {STT}/{STT_STREAM}, treat it as
+        # placeholder expansion mode (useful for CI/docker and one-shot runs).
+        if rest and any(("{STT}" in a) or ("{STT_STREAM}" in a) for a in rest):
+            nlp2cmd_prewarm(config)
+            text = shell.listen(stt_file=stt_file)
+            if stt_only:
+                print(text)
+                return 0 if text else 1
+            if not text:
+                return 1
+
+            expanded = [str(a).replace("{STT}", text).replace("{STT_STREAM}", text) for a in rest]
+            cmd = " ".join(expanded)
+
+            if dry_run:
+                print(cmd)
+                return 0
+
+            ok, reason = check_command_safety(cmd, config, dry_run)
+            if not ok:
+                return 0 if reason == "dry-run" else 1
+
+            out, code, printed = shell.run_command_any(cmd)
+            if out.strip() and not printed:
+                print(out, end="", flush=True)
+            lines = [l.strip() for l in out.splitlines() if l.strip()]
+            if lines and shell.tts and config.get("auto_tts", True):
+                shell.tts.speak(lines[-1][:200])
+            return code
+
+        # Default: execute transcript (with optional nlp2cmd translation)
         nlp2cmd_prewarm(config)
         text = shell.listen(stt_file=stt_file)
         if stt_only:
@@ -3585,7 +3616,7 @@ def main():
     if dry_run:
         # pipeline-friendly: all logs/prompts to stderr; stdout contains ONLY the final command
         with contextlib.redirect_stdout(sys.stderr):
-            expanded = expand_placeholders(rest, shell, config)
+            expanded = expand_placeholders(rest, shell, config, stt_file=stt_file)
             if expanded is None:
                 return 1
             cmd = " ".join(expanded)
@@ -3597,7 +3628,7 @@ def main():
                 return 0
             return 0
 
-    expanded = expand_placeholders(rest, shell, config)
+    expanded = expand_placeholders(rest, shell, config, stt_file=stt_file)
     if expanded is None:
         return 1
 

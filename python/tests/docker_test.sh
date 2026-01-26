@@ -19,6 +19,14 @@ echo "== Execute from STT file (mock) =="
 out=$(python3 "$ROOT/stts" --stt-file "$ROOT/samples/cmd_echo_hello.wav")
 echo "$out" | grep -q "hello"
 
+echo "== Placeholder {STT} (mock, dry-run) =="
+out=$(python3 "$ROOT/stts" --stt-file "$ROOT/samples/cmd_echo_hello.wav" --dry-run echo "{STT}")
+echo "$out" | grep -q "echo hello"
+
+echo "== Execute ls from STT file (mock) =="
+out=$(python3 "$ROOT/stts" --stt-file "$ROOT/samples/cmd_ls.wav")
+echo "$out" | grep -q "README.md"
+
 echo "== STT stream shell (mock, placeholder, dry-run) =="
 out=$(python3 "$ROOT/stts" --stt-file "$ROOT/samples/cmd_echo_hello.wav" --stt-stream-shell --cmd "echo '{STT_STREAM}'" --dry-run)
 echo "$out" | grep -q "echo hello"

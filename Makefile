@@ -1,7 +1,8 @@
 # stts - Universal Voice Shell
 # Makefile integration
 
-.PHONY: install test voice setup clean help setup-python setup-nodejs voice-python voice-nodejs gen-samples-python gen-samples-nodejs docker-build-python docker-build-nodejs docker-test-python docker-test-nodejs test-docker
+.PHONY: install test voice setup clean help setup-python setup-nodejs voice-python voice-nodejs gen-samples-python gen-samples-nodejs docker-build-python docker-build-nodejs docker-test-python docker-test-nodejs test-docker \
+	stt-vosk-pl stt-silero stt-whisper-stream tts-piper-pl tts-mimic3 tts-festival setup-local-full test-local
 
 VERSION := $(shell cat VERSION 2>/dev/null || echo 0.0.0)
 
@@ -69,6 +70,33 @@ docker-test-python:
 
 docker-test-nodejs:
 	@$(MAKE) -C nodejs docker-test CACHE_DIR=$(CACHE_DIR_NODEJS)
+
+# ============================================================================
+# LOCAL STT/TTS (delegated to python/)
+# ============================================================================
+stt-vosk-pl:
+	@$(MAKE) -C python stt-vosk-pl
+
+stt-silero:
+	@$(MAKE) -C python stt-silero
+
+stt-whisper-stream:
+	@$(MAKE) -C python stt-whisper-stream
+
+tts-piper-pl:
+	@$(MAKE) -C python tts-piper-pl
+
+tts-mimic3:
+	@$(MAKE) -C python tts-mimic3
+
+tts-festival:
+	@$(MAKE) -C python tts-festival
+
+setup-local-full:
+	@$(MAKE) -C python setup-local-full
+
+test-local:
+	@$(MAKE) -C python test-local
 
 test-docker:
 	@fail=0; \
