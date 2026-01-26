@@ -7,6 +7,8 @@ STTS="$ROOT/python/stts"
 SAMPLES="$ROOT/python/samples"
 VENV="$ROOT/venv/bin/python"
 TMP_DIR="/tmp/stts_benchmark_$$"
+METRICS_PY="$ROOT/examples/bench_metrics.py"
+OUT_CSV="$TMP_DIR/results.csv"
 
 # Use venv python if available
 if [ -f "$VENV" ]; then
@@ -18,6 +20,49 @@ fi
 mkdir -p "$TMP_DIR"
 cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT
+
+_ts() {
+  # monotonic timestamp in seconds (float)
+  "$PYTHON" - <<'PY'
+import time
+print(f"{time.perf_counter():.9f}")
+PY
+}
+
+_dt() {
+  # delta seconds = end - start
+  "$PYTHON" - "$1" "$2" <<'PY'
+import sys
+start=float(sys.argv[1]); end=float(sys.argv[2])
+print(f"{(end-start):.6f}")
+PY
+}
+
+_fmt() {
+  # format float seconds to 2 decimals
+  "$PYTHON" - "$1" <<'PY'
+import sys
+v=float(sys.argv[1])
+print(f"{v:.2f}")
+PY
+}
+
+_wer() {
+  "$PYTHON" "$METRICS_PY" wer "$1" "$2" 2>/dev/null || echo "1.0000"
+}
+
+_cer() {
+  "$PYTHON" "$METRICS_PY" cer "$1" "$2" 2>/dev/null || echo "1.0000"
+}
+
+_ratio() {
+  "$PYTHON" "$METRICS_PY" ratio "$1" "$2" 2>/dev/null || echo "0.0000"
+}
+
+_stats() {
+  # prints: avg,p50,p95,min,max
+  "$PYTHON" "$METRICS_PY" stats "$@" 2>/dev/null || echo "0,0,0,0,0"
+}
 
 # Colors
 RED='\033[0;31m'
@@ -45,12 +90,30 @@ declare -A SAMPLES_EXPECTED
 SAMPLES_EXPECTED["cmd_echo_hello.wav"]="echo hello"
 SAMPLES_EXPECTED["cmd_ls.wav"]="ls"
 
+_expected_for() {
+  local wav_path="$1"
+  local sidecar="${wav_path}.txt"
+  if [ -f "$sidecar" ]; then
+    cat "$sidecar"
+    return 0
+  fi
+  local base
+  base="$(basename "$wav_path")"
+  if [ -n "${SAMPLES_EXPECTED[$base]+x}" ]; then
+    printf "%s" "${SAMPLES_EXPECTED[$base]}"
+    return 0
+  fi
+  echo ""
+}
+
+echo "provider,kind,sample,expected,transcript,time_s,wer,cer,ratio,tts_provider" > "$OUT_CSV"
+
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}  STT Benchmark${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-printf "%-15s %-20s %-10s %-15s %-20s\n" "Provider" "Sample" "Time(s)" "Accuracy" "Transcription"
+printf "%-15s %-20s %-10s %-10s %-10s %-10s %-12s\n" "Provider" "Sample" "Time(s)" "WER" "CER" "Sim" "Transcription"
 echo "─────────────────────────────────────────────────────────────────────────────────"
 
 STT_RESULTS=()
@@ -60,8 +123,8 @@ for i in "${!STT_PROVIDERS[@]}"; do
   model="${STT_MODELS[$i]}"
   
   for sample in "${!SAMPLES_EXPECTED[@]}"; do
-    expected="${SAMPLES_EXPECTED[$sample]}"
     sample_path="$SAMPLES/$sample"
+    expected="$(_expected_for "$sample_path")"
     
     if [ ! -f "$sample_path" ]; then
       continue
@@ -75,25 +138,33 @@ for i in "${!STT_PROVIDERS[@]}"; do
     cmd="$cmd --stt-file $sample_path --stt-only"
     
     # Measure time
-    start_time=$(date +%s.%N)
+    start_time=$(_ts)
     result=$(eval "$cmd" 2>/dev/null | tail -1) || result=""
-    end_time=$(date +%s.%N)
-    
-    elapsed=$(echo "$end_time - $start_time" | bc 2>/dev/null || echo "0")
-    elapsed=$(printf "%.2f" "$elapsed")
-    
-    # Calculate accuracy (simple word match)
-    result_lower=$(echo "$result" | tr '[:upper:]' '[:lower:]')
-    expected_lower=$(echo "$expected" | tr '[:upper:]' '[:lower:]')
-    
-    if [ "$result_lower" = "$expected_lower" ]; then
-      accuracy="100%"
+    end_time=$(_ts)
+    elapsed_raw=$(_dt "$start_time" "$end_time")
+    elapsed=$(_fmt "$elapsed_raw")
+
+    wer=$(_wer "$expected" "$result")
+    cer=$(_cer "$expected" "$result")
+    sim=$(_ratio "$expected" "$result")
+
+    # Colorize WER (lower is better)
+    acc_color="$GREEN"
+    if "$PYTHON" - "$wer" <<'PY' >/dev/null 2>&1
+import sys
+wer=float(sys.argv[1])
+sys.exit(0 if wer <= 0.25 else 1)
+PY
+    then
       acc_color="$GREEN"
-    elif echo "$result_lower" | grep -q "$(echo "$expected_lower" | cut -d' ' -f1)"; then
-      accuracy="~50%"
+    elif "$PYTHON" - "$wer" <<'PY' >/dev/null 2>&1
+import sys
+wer=float(sys.argv[1])
+sys.exit(0 if wer <= 0.60 else 1)
+PY
+    then
       acc_color="$YELLOW"
     else
-      accuracy="0%"
       acc_color="$RED"
     fi
     
@@ -103,10 +174,11 @@ for i in "${!STT_PROVIDERS[@]}"; do
       result_display="${result_display}..."
     fi
     
-    printf "%-15s %-20s %-10s ${acc_color}%-15s${NC} %-20s\n" \
-      "$provider" "${sample%.wav}" "${elapsed}s" "$accuracy" "$result_display"
-    
-    STT_RESULTS+=("$provider|$sample|$elapsed|$accuracy|$result")
+    printf "%-15s %-20s %-10s ${acc_color}%-10s${NC} %-10s %-10s %-12s\n" \
+      "$provider" "${sample%.wav}" "${elapsed}s" "$wer" "$cer" "$sim" "$result_display"
+
+    echo "${provider},stt,${sample},\"${expected}\",\"${result}\",${elapsed_raw},${wer},${cer},${sim}," >> "$OUT_CSV"
+    STT_RESULTS+=("$provider|$sample|$elapsed_raw|$wer|$cer|$sim|$result")
   done
 done
 
@@ -142,13 +214,12 @@ for i in "${!TTS_PROVIDERS[@]}"; do
   
   for phrase in "${TTS_PHRASES[@]}"; do
     # Measure time
-    start_time=$(date +%s.%N)
+    start_time=$(_ts)
     STTS_TTS_PROVIDER="$provider" STTS_TTS_VOICE="$voice" \
       $PYTHON $STTS --tts-test "$phrase" >/dev/null 2>&1 || true
-    end_time=$(date +%s.%N)
-    
-    elapsed=$(echo "$end_time - $start_time" | bc 2>/dev/null || echo "0")
-    elapsed=$(printf "%.2f" "$elapsed")
+    end_time=$(_ts)
+    elapsed_raw=$(_dt "$start_time" "$end_time")
+    elapsed=$(_fmt "$elapsed_raw")
     
     # Truncate phrase for display
     phrase_display="${phrase:0:38}"
@@ -158,8 +229,9 @@ for i in "${!TTS_PROVIDERS[@]}"; do
     
     printf "%-15s %-10s %-40s %-10s\n" \
       "$provider" "$voice" "$phrase_display" "${elapsed}s"
-    
-    TTS_RESULTS+=("$provider|$voice|$phrase|$elapsed")
+
+    echo "${provider},tts,phrase,\"${phrase}\",,${elapsed_raw},,,,${provider}" >> "$OUT_CSV"
+    TTS_RESULTS+=("$provider|$voice|$phrase|$elapsed_raw")
   done
 done
 
@@ -176,7 +248,7 @@ echo ""
 echo "Testing: audio → STT → transcription → TTS → speak"
 echo ""
 
-printf "%-15s %-15s %-20s %-12s %-15s\n" "STT" "TTS" "Sample" "Total(s)" "Status"
+printf "%-15s %-15s %-20s %-12s %-10s %-10s\n" "STT" "TTS" "Sample" "Total(s)" "WER" "Text"
 echo "─────────────────────────────────────────────────────────────────────────────────"
 
 PIPELINE_RESULTS=()
@@ -204,29 +276,34 @@ for si in "${!STT_PROVIDERS[@]}"; do
       stt_cmd="$stt_cmd --stt-file $sample_path --stt-only"
       
       # Full pipeline timing
-      start_time=$(date +%s.%N)
+      start_time=$(_ts)
       
       # Step 1: STT
       transcription=$(eval "$stt_cmd" 2>/dev/null | tail -1) || transcription=""
       
+      expected="$(_expected_for "$sample_path")"
+      wer=$(_wer "$expected" "$transcription")
+
       # Step 2: TTS (speak transcription)
       if [ -n "$transcription" ]; then
         STTS_TTS_PROVIDER="$tts_provider" STTS_TTS_VOICE="$tts_voice" \
           $PYTHON $STTS --tts-test "$transcription" >/dev/null 2>&1 || true
-        status="${GREEN}✅ OK${NC}"
-      else
-        status="${RED}❌ FAIL${NC}"
       fi
-      
-      end_time=$(date +%s.%N)
-      elapsed=$(echo "$end_time - $start_time" | bc 2>/dev/null || echo "0")
-      elapsed=$(printf "%.2f" "$elapsed")
-      
-      printf "%-15s %-15s %-20s %-12s " \
-        "$stt_provider" "$tts_provider" "${sample%.wav}" "${elapsed}s"
-      echo -e "$status"
-      
-      PIPELINE_RESULTS+=("$stt_provider|$tts_provider|$sample|$elapsed")
+
+      end_time=$(_ts)
+      elapsed_raw=$(_dt "$start_time" "$end_time")
+      elapsed=$(_fmt "$elapsed_raw")
+
+      txt_disp="${transcription:0:12}"
+      if [ ${#transcription} -gt 12 ]; then
+        txt_disp="${txt_disp}..."
+      fi
+
+      printf "%-15s %-15s %-20s %-12s %-10s %-10s\n" \
+        "$stt_provider" "$tts_provider" "${sample%.wav}" "${elapsed}s" "$wer" "$txt_disp"
+
+      echo "${stt_provider},pipeline,${sample},\"${expected}\",\"${transcription}\",${elapsed_raw},${wer},,,${tts_provider}" >> "$OUT_CSV"
+      PIPELINE_RESULTS+=("$stt_provider|$tts_provider|$sample|$elapsed_raw|$wer")
     done
   done
 done
@@ -242,62 +319,62 @@ echo -e "${CYAN}  Summary${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-# Calculate averages
-whisper_total=0
-whisper_count=0
-vosk_total=0
-vosk_count=0
-piper_total=0
-piper_count=0
-espeak_total=0
-espeak_count=0
+echo "STT Times (avg,p50,p95,min,max):"
+whisper_times=()
+vosk_times=()
+whisper_wers=()
+vosk_wers=()
 
 for r in "${STT_RESULTS[@]}"; do
   provider=$(echo "$r" | cut -d'|' -f1)
   time=$(echo "$r" | cut -d'|' -f3)
-  
+  w=$(echo "$r" | cut -d'|' -f4)
   if [ "$provider" = "whisper_cpp" ]; then
-    whisper_total=$(echo "$whisper_total + $time" | bc 2>/dev/null || echo "$whisper_total")
-    ((whisper_count++)) || true
+    whisper_times+=("$time")
+    whisper_wers+=("$w")
   elif [ "$provider" = "vosk" ]; then
-    vosk_total=$(echo "$vosk_total + $time" | bc 2>/dev/null || echo "$vosk_total")
-    ((vosk_count++)) || true
+    vosk_times+=("$time")
+    vosk_wers+=("$w")
   fi
 done
 
-for r in "${TTS_RESULTS[@]}"; do
-  provider=$(echo "$r" | cut -d'|' -f1)
-  time=$(echo "$r" | cut -d'|' -f4)
-  
-  if [ "$provider" = "piper" ]; then
-    piper_total=$(echo "$piper_total + $time" | bc 2>/dev/null || echo "$piper_total")
-    ((piper_count++)) || true
-  elif [ "$provider" = "espeak" ]; then
-    espeak_total=$(echo "$espeak_total + $time" | bc 2>/dev/null || echo "$espeak_total")
-    ((espeak_count++)) || true
-  fi
-done
-
-echo "STT Average Times:"
-if [ "$whisper_count" -gt 0 ]; then
-  avg=$(echo "scale=2; $whisper_total / $whisper_count" | bc 2>/dev/null || echo "N/A")
-  echo "  whisper_cpp: ${avg}s"
+if [ ${#whisper_times[@]} -gt 0 ]; then
+  s=$(_stats "${whisper_times[@]}")
+  echo "  whisper_cpp: $s"
+  w=$(_stats "${whisper_wers[@]}")
+  echo "    WER:       $w"
 fi
-if [ "$vosk_count" -gt 0 ]; then
-  avg=$(echo "scale=2; $vosk_total / $vosk_count" | bc 2>/dev/null || echo "N/A")
-  echo "  vosk:        ${avg}s"
+if [ ${#vosk_times[@]} -gt 0 ]; then
+  s=$(_stats "${vosk_times[@]}")
+  echo "  vosk:        $s"
+  w=$(_stats "${vosk_wers[@]}")
+  echo "    WER:       $w"
 fi
 
 echo ""
-echo "TTS Average Times:"
-if [ "$piper_count" -gt 0 ]; then
-  avg=$(echo "scale=2; $piper_total / $piper_count" | bc 2>/dev/null || echo "N/A")
-  echo "  piper:  ${avg}s"
+echo "TTS Times (avg,p50,p95,min,max):"
+piper_times=()
+espeak_times=()
+for r in "${TTS_RESULTS[@]}"; do
+  provider=$(echo "$r" | cut -d'|' -f1)
+  time=$(echo "$r" | cut -d'|' -f4)
+  if [ "$provider" = "piper" ]; then
+    piper_times+=("$time")
+  elif [ "$provider" = "espeak" ]; then
+    espeak_times+=("$time")
+  fi
+done
+if [ ${#piper_times[@]} -gt 0 ]; then
+  s=$(_stats "${piper_times[@]}")
+  echo "  piper:  $s"
 fi
-if [ "$espeak_count" -gt 0 ]; then
-  avg=$(echo "scale=2; $espeak_total / $espeak_count" | bc 2>/dev/null || echo "N/A")
-  echo "  espeak: ${avg}s"
+if [ ${#espeak_times[@]} -gt 0 ]; then
+  s=$(_stats "${espeak_times[@]}")
+  echo "  espeak: $s"
 fi
+
+echo ""
+echo "CSV written: $OUT_CSV"
 
 echo ""
 echo -e "${GREEN}╔═══════════════════════════════════════════════════════════════╗${NC}"
