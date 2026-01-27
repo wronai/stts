@@ -23,6 +23,8 @@ voice:
 test:
 	@echo "🧪 Running Python tests (unittest)..."
 	@python3 -m unittest discover -s tests -p "test_*.py" -v
+	@echo "🧪 Running CLI smoke tests (mock STT)..."
+	@STTS_SKIP_UNITTESTS=1 STTS_SKIP_SAMPLE_GEN=1 bash tests/docker_test.sh
 
 test-tts:
 	@command -v espeak >/dev/null && espeak -v pl "Test syntezatora mowy" || echo "❌ espeak not found"

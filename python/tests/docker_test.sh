@@ -4,13 +4,23 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 
-echo "== Generating samples =="
-"$ROOT/scripts/generate_samples.sh"
+if [ -z "${STTS_SKIP_SAMPLE_GEN:-}" ]; then
+  if command -v espeak >/dev/null 2>&1; then
+    echo "== Generating samples =="
+    "$ROOT/scripts/generate_samples.sh"
+  else
+    echo "== Skipping sample generation (espeak not found) =="
+  fi
+fi
 
 export STTS_MOCK_STT=1
+export STTS_NLP2CMD_ENABLED=0
+export STTS_NLP2CMD_CONFIRM=0
 
-echo "== Python unittest (functional + e2e) =="
-python3 -m unittest discover -s "$ROOT/tests" -p "test_*.py" -v
+if [ -z "${STTS_SKIP_UNITTESTS:-}" ]; then
+  echo "== Python unittest (functional + e2e) =="
+  python3 -m unittest discover -s "$ROOT/tests" -p "test_*.py" -v
+fi
 
 echo "== STT only (mock) =="
 python3 "$ROOT/stts" --stt-file "$ROOT/samples/cmd_echo_hello.wav" --stt-only | grep -q "echo hello"

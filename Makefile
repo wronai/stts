@@ -121,6 +121,10 @@ test-docker:
 			exit 1; \
 		fi
 
+# Test Python unittests
+test:
+	@$(MAKE) -C python test
+
 # Test TTS
 test-tts:
 	@echo "🔊 Testing TTS..."
@@ -169,6 +173,7 @@ help:
 	@echo "  make publish      - Publish to both npmjs and PyPI"
 	@echo "  make voice        - Start voice shell (Python)"
 	@echo "  make voice-node   - Start voice shell (Node.js)"
+	@echo "  make test         - Run Python unittests"
 	@echo "  make test-tts     - Test TTS"
 	@echo "  make test-stt     - Test microphone"
 	@echo "  make clean        - Remove downloaded models"
