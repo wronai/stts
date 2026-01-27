@@ -1,8 +1,64 @@
 import contextlib
 import os
+import re
 import sys
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
+
+
+def _yaml_mode() -> bool:
+    return os.environ.get("STTS_OUTPUT_FORMAT", "yaml").strip().lower() in ("yaml", "yml")
+
+
+def _yaml_out():
+    return sys.__stdout__ if _yaml_mode() else sys.stdout
+
+
+def _yaml_quote_scalar(v: Any) -> str:
+    if v is None:
+        return "null"
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return str(v)
+    s = str(v)
+    if s == "":
+        return "\"\""
+    if any(ch.isspace() for ch in s) or any(ch in s for ch in (":", "#", "\"", "'")):
+        s2 = s.replace("\\", "\\\\").replace("\"", "\\\"")
+        return f"\"{s2}\""
+    return s
+
+
+def _yaml_unquote_scalar(s: str) -> str:
+    v = (s or "").strip()
+    if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+        return v[1:-1]
+    return v
+
+
+def _extract_last_stt_text_from_stream(data: str) -> str:
+    last = ""
+    in_event = False
+    for raw in (data or "").splitlines():
+        line = raw.rstrip("\n")
+        if line.strip() == "event:":
+            in_event = True
+            continue
+        if in_event:
+            m_type = re.match(r"^\s*type:\s*(.+)\s*$", line)
+            if m_type:
+                t = _yaml_unquote_scalar(m_type.group(1))
+                if t != "stt":
+                    in_event = False
+                continue
+            m_text = re.match(r"^\s*text:\s*(.+)\s*$", line)
+            if m_text:
+                last = _yaml_unquote_scalar(m_text.group(1))
+    if last:
+        return last
+    lines = [l.strip() for l in (data or "").splitlines() if l.strip()]
+    return lines[-1] if lines else ""
 
 
 @dataclass
@@ -70,7 +126,22 @@ def run_stt_stream_shell(deps: PipelineDeps, shell, config, stt_file, stream_she
                 shell.tts.speak(lines[-1][:200])
 
             if one_shot:
-                return code
+                if _yaml_mode():
+        try:
+            _yaml_out().write("\n".join([
+                "event:",
+                "  type: nlp2cmd",
+                f"  text: {_yaml_quote_scalar(text)}",
+                "  ok: true",
+                f"  command: {_yaml_quote_scalar(translated)}",
+                "  run: true",
+                "  dry_run: false",
+                f"  exit_code: {int(code)}",
+            ]) + "\n")
+            _yaml_out().flush()
+        except BrokenPipeError:
+            return 0
+    return code
         except KeyboardInterrupt:
             print("", file=sys.stderr)
             if one_shot:
@@ -84,7 +155,19 @@ def run_stt_once(deps: PipelineDeps, shell, stt_file):
     with contextlib.redirect_stdout(sys.stderr):
         text = shell.listen(stt_file=stt_file) if stt_file else shell.listen()
     if text:
-        print(text)
+        if _yaml_mode():
+            try:
+                _yaml_out().write("\n".join([
+                    "event:",
+                    "  type: stt",
+                    f"  text: {_yaml_quote_scalar(text)}",
+                    "  action: recognized",
+                ]) + "\n")
+                _yaml_out().flush()
+            except BrokenPipeError:
+                return 0
+        else:
+            print(text)
         return 0 if text else 1
     return 1
 
@@ -114,6 +197,22 @@ def run_nlp2cmd_parallel_fastpath(deps: PipelineDeps, config, shell, stt_file, s
         return 1
 
     if dry_run:
+        if _yaml_mode():
+            try:
+                _yaml_out().write("\n".join([
+                    "event:",
+                    "  type: nlp2cmd",
+                    f"  text: {_yaml_quote_scalar(text)}",
+                    "  ok: true",
+                    f"  command: {_yaml_quote_scalar(translated)}",
+                    "  run: true",
+                    "  dry_run: true",
+                    "  exit_code: 0",
+                ]) + "\n")
+                _yaml_out().flush()
+            except BrokenPipeError:
+                return 0
+            return 0
         print(translated)
         return 0
 
@@ -211,8 +310,7 @@ def run_nlp2cmd_stdin_mode(deps: PipelineDeps, config, shell, rest, dry_run):
         data = sys.stdin.read()
     except Exception:
         data = ""
-    lines = [l.strip() for l in (data or "").splitlines() if l.strip()]
-    text = lines[-1] if lines else ""
+    text = _extract_last_stt_text_from_stream(data)
     if not text:
         deps.cprint(deps.Colors.RED, "❌ stdin: brak tekstu")
         return 1
@@ -220,23 +318,37 @@ def run_nlp2cmd_stdin_mode(deps: PipelineDeps, config, shell, rest, dry_run):
     deps.nlp2cmd_prewarm_force()
     translated = deps.nlp2cmd_translate(text, config=config, force=True)
     if not translated:
-        try:
-            print(
-                "\n".join(
-                    [
-                        "event:",
-                        "  type: nlp2cmd",
-                        f"  text: {text}",
-                        "  ok: false",
-                        "  reason: no_command",
-                    ]
-                )
-            )
-        except BrokenPipeError:
-            return 0
+        if _yaml_mode():
+            try:
+                _yaml_out().write("\n".join([
+                    "event:",
+                    "  type: nlp2cmd",
+                    f"  text: {_yaml_quote_scalar(text)}",
+                    "  ok: false",
+                    "  reason: no_command",
+                ]) + "\n")
+                _yaml_out().flush()
+            except BrokenPipeError:
+                return 0
+        else:
+            deps.cprint(deps.Colors.RED, "❌ nlp2cmd: brak wygenerowanej komendy")
         return 1
 
     if not run_mode:
+        if _yaml_mode():
+            try:
+                _yaml_out().write("\n".join([
+                    "event:",
+                    "  type: nlp2cmd",
+                    f"  text: {_yaml_quote_scalar(text)}",
+                    "  ok: true",
+                    f"  command: {_yaml_quote_scalar(translated)}",
+                    "  run: false",
+                ]) + "\n")
+                _yaml_out().flush()
+            except BrokenPipeError:
+                return 0
+            return 0
         print(translated)
         return 0
 

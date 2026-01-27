@@ -590,8 +590,11 @@ def emit_startup_yaml(config: dict) -> None:
         v = os.environ.get("STTS_STARTUP_YAML", "1").strip().lower()
         if v in ("0", "false", "no", "n"):
             return
-        force_stdout = os.environ.get("STTS_STARTUP_YAML_STDOUT", "0").strip().lower() in ("1", "true", "yes", "y")
-        out = sys.stdout if (force_stdout or sys.stdout.isatty()) else sys.stderr
+        if _yaml_mode():
+            out = sys.__stdout__
+        else:
+            force_stdout = os.environ.get("STTS_STARTUP_YAML_STDOUT", "0").strip().lower() in ("1", "true", "yes", "y")
+            out = sys.stdout if (force_stdout or sys.stdout.isatty()) else sys.stderr
         out.write(build_startup_yaml(config))
         out.flush()
     except BrokenPipeError:
@@ -4396,29 +4399,30 @@ class VoiceShell:
 
     def run(self):
         PS1 = f"{Colors.GREEN}🔊 stts(py)>{Colors.NC} "
-        cprint(Colors.BOLD + Colors.CYAN, "\nSTTS (python) - Voice Shell\n")
-        if self.info.os_name == "linux":
-            src, sink = get_active_pulse_devices()
-            if src or sink:
-                cprint(Colors.CYAN, "Aktywne urządzenia (PulseAudio):")
-                if src:
-                    print(f"  mic: {src}")
-                if sink:
-                    print(f"  speaker: {sink}")
+        if not _yaml_mode():
+            cprint(Colors.BOLD + Colors.CYAN, "\nSTTS (python) - Voice Shell\n")
+            if self.info.os_name == "linux":
+                src, sink = get_active_pulse_devices()
+                if src or sink:
+                    cprint(Colors.CYAN, "Aktywne urządzenia (PulseAudio):")
+                    if src:
+                        print(f"  mic: {src}")
+                    if sink:
+                        print(f"  speaker: {sink}")
 
-        stt_state = "disabled"
-        if self.stt:
-            stt_state = f"{getattr(self.stt, 'name', 'stt')} model={getattr(self.stt, 'model', '')}"
-        else:
-            reason = f" reason={self._stt_unavailable_reason}" if self._stt_unavailable_reason else ""
-            stt_state = f"disabled (stt_provider={self.config.get('stt_provider')} stt_model={self.config.get('stt_model')}{reason})"
-        print(f"STT: {stt_state}")
+            stt_state = "disabled"
+            if self.stt:
+                stt_state = f"{getattr(self.stt, 'name', 'stt')} model={getattr(self.stt, 'model', '')}"
+            else:
+                reason = f" reason={self._stt_unavailable_reason}" if self._stt_unavailable_reason else ""
+                stt_state = f"disabled (stt_provider={self.config.get('stt_provider')} stt_model={self.config.get('stt_model')}{reason})"
+            print(f"STT: {stt_state}")
 
-        tts_state = "disabled"
-        if self.tts:
-            tts_state = f"{getattr(self.tts, 'name', 'tts')} voice={getattr(self.tts, 'voice', '')}"
-        print(f"TTS: {tts_state}")
-        print("Komendy: ENTER=STT, 'exit'=wyjście, 'setup'=konfiguracja, 'audio'=urządzenia, 'meter'=poziomy")
+            tts_state = "disabled"
+            if self.tts:
+                tts_state = f"{getattr(self.tts, 'name', 'tts')} voice={getattr(self.tts, 'voice', '')}"
+            print(f"TTS: {tts_state}")
+            print("Komendy: ENTER=STT, 'exit'=wyjście, 'setup'=konfiguracja, 'audio'=urządzenia, 'meter'=poziomy")
         if self.config.get("startup_tts", True):
             self.speak("Powiedz co chcesz zrobić. Naciśnij enter i mów do mikrofonu.")
 
@@ -4464,6 +4468,7 @@ class VoiceShell:
                     cmd = self.listen()
                     if not cmd:
                         continue
+                    emit_stt_event_yaml(cmd, action="recognized", translated=None, reason=None)
                     translated = nlp2cmd_translate(cmd, config=self.config)
                     if (not translated) and _looks_like_natural_language(cmd):
                         translated = nlp2cmd_translate(cmd, config=self.config, force=True)
@@ -5018,6 +5023,12 @@ def expand_placeholders(args, shell, config, stt_file=None):
 def main():
     config = load_config()
     stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test_flag, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, stt_provider_arg, stt_model_arg, timeout_s, vad_silence_ms, list_stt, list_tts, nlp2cmd_parallel, daemon_mode, nlp2cmd_url, nlp2cmd_timeout_s, daemon_log, daemon_no_execute, daemon_triggers, daemon_triggers_file, daemon_wake_word, rest = parse_args(sys.argv[1:])
+
+    if _yaml_mode():
+        try:
+            sys.stdout = sys.stderr
+        except Exception:
+            pass
 
     deps = PipelineDeps(
         cprint=cprint,
