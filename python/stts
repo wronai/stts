@@ -3500,7 +3500,6 @@ def generate_wake_word_variants(phrase: str, max_variants: int = 24) -> List[str
         ("ken", ["kan"]),
         ("kan", ["ken"]),
         ("ch", ["h"]),
-        ("h", ["ch"]),
         ("rz", ["z"]),
         ("sz", ["s"]),
         ("cz", ["c"]),

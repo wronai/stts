@@ -521,6 +521,8 @@ nlp2cmd service --auto-execute --host 0.0.0.0 --port 8008
 ./stts --daemon --nlp2cmd-url http://localhost:8008
 ./stts --daemon --nlp2cmd-url http://localhost:8008 --stt-provider vosk --stt-model pl
 ./stts --daemon --nlp2cmd-url http://localhost:8008 --wake-word "hejken" --stt-provider vosk --stt-model pl
+./stts --daemon --nlp2cmd-url http://localhost:8008 --wake-word "hej" --stt-provider whisper_cpp --stt-model tiny
+./stts --daemon --nlp2cmd-url http://localhost:8008 --wake-word "hej" --stt-provider whisper_cpp --stt-model base
 ./stts --daemon --nlp2cmd-url http://localhost:8008 --wake-word "hej" --timeout 8 --vad-silence-ms 1200 --stt-provider vosk --stt-model pl
 ```
 
