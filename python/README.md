@@ -2,6 +2,11 @@
 
 Voice shell wrapper (STT+TTS) w Pythonie.
 
+Zobacz też:
+
+- [stt_providers.md](../docs/stt_providers.md)
+- [tts_providers.md](../docs/tts_providers.md)
+
 ## Uruchomienie
 
 ```bash
@@ -18,6 +23,9 @@ Możesz nadpisać providera/model STT bez zmiany `.env`:
 ```bash
 ./stts --stt-provider whisper_cpp --stt-file samples/cmd_ls.wav --stt-only
 ./stts --stt-provider vosk --stt-model small-pl --stt-file samples/cmd_ls.wav --stt-only
+./stts --stt-provider faster_whisper --stt-model base --stt-file samples/cmd_ls.wav --stt-only
+STTS_FASTER_WHISPER_DEVICE=cpu STTS_FASTER_WHISPER_COMPUTE_TYPE=int8 \
+  ./stts --stt-provider faster_whisper --stt-model base --stt-file samples/cmd_ls.wav --stt-only
 ./stts --stt-provider deepgram --stt-file samples/cmd_ls.wav --stt-only
 ```
 

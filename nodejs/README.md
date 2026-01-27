@@ -2,6 +2,11 @@
 
 Voice shell wrapper (STT+TTS) w Node.js (ESM).
 
+Zobacz też:
+
+- `../docs/stt_providers.md`
+- `../docs/tts_providers.md`
+
 ## Wymagania
 
 - Node.js 18+
@@ -16,6 +21,11 @@ Voice shell wrapper (STT+TTS) w Node.js (ESM).
 ```
 
 Uwaga: część "rozszerzeń" CLI (np. `{STT}` placeholder, `--stt-once`, `--init`) jest dostępna tylko w wersji Python (`./stts`).
+
+W tej implementacji:
+
+- STT: `whisper_cpp`
+- TTS: `espeak`, `piper`, `spd-say`, `flite`, `say` (macOS)
 
 ## .env (konfiguracja)
 

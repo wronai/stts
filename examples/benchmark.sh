@@ -90,6 +90,12 @@ echo ""
 STT_PROVIDERS=("whisper_cpp" "vosk")
 STT_MODELS=("${STTS_BENCH_WHISPER_MODEL:-tiny}" "${STTS_BENCH_VOSK_MODEL:-small-pl}")
 
+# Optional: include faster-whisper in the matrix (requires `pip install faster-whisper`)
+if [ "${STTS_BENCH_INCLUDE_FASTER_WHISPER:-}" = "1" ]; then
+  STT_PROVIDERS+=("faster_whisper")
+  STT_MODELS+=("${STTS_BENCH_FASTER_WHISPER_MODEL:-base}")
+fi
+
 # Sample files with expected transcriptions
 declare -A SAMPLES_EXPECTED
 SAMPLES_EXPECTED["cmd_echo_hello.wav"]="echo hello"

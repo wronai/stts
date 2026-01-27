@@ -12,6 +12,13 @@ Or directly:
 STTS_BENCH_WARMUP=1 STTS_BENCH_ITERS=3 ./examples/benchmark.sh
 ```
 
+Optional (include `faster_whisper` in STT matrix):
+
+```bash
+STTS_BENCH_INCLUDE_FASTER_WHISPER=1 STTS_BENCH_FASTER_WHISPER_MODEL=base \
+  STTS_BENCH_WARMUP=1 STTS_BENCH_ITERS=3 ./examples/benchmark.sh
+```
+
 ## Environment / notes
 
 - Benchmark default sets `STTS_TTS_NO_PLAY=1` (measures synthesis time without audio playback).

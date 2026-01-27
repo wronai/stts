@@ -1,5 +1,23 @@
 ![img.png](img.png)
+
+![img_1.png](img_1.png)
+
 # 🎙️ stts - Universal Voice Shell
+
+```yaml
+selected_models:
+  stt:
+    provider: vosk
+    model: small-pl
+  tts:
+    provider: piper
+    voice: pl_PL-gosia-medium
+io:
+  input:
+    - microphone
+  output:
+    - speaker
+```
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
@@ -70,45 +88,30 @@ Uruchamianie komend shell nawet z błędami fonetycznymi za pomocą nlp2cmd:
 
 # tryb pipeline (1 rozpoznanie -> 1 komenda)
 ./stts --stt-once | ./stts nlp2cmd -r stdin --auto-confirm --run
+
+./stts --timeout 8 --vad-silence-ms 1200 --stt-provider vosk --stt-model pl | ./stts nlp2cmd -r stdin --auto-confirm --run
 ```
 
 output
 ```bash
-[13:14:01] 🎤 Mów (max 5s, VAD)... ✅ VAD stop (3.4s / 3.7s)
-🔎 audio: 3.4s, rms=-37.4dBFS
-[13:14:05] 🔄 Rozpoznawanie... ✅ "lista folderów" (5.5s)
-╭─────────────────────────────────────────────────────────────────────────────────────────────────────────────── 🚀 Run Mode ────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ lista folderów                                                                                                                                                                                                                             │
-╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-
-Generating command...
-Detected: shell/list
-
-$ ls -la .
-  total 108
-  drwxrwxr-x 10 tom tom  4096 Jan 24 13:13 .
-  drwxrwxr-x 31 tom tom  4096 Jan 24 09:33 ..
-  -rw-r--r--  1 tom tom  1512 Jan 24 12:12 .env.example
-  drwxrwxr-x  7 tom tom  4096 Jan 24 13:06 .git
-  -rw-r--r--  1 tom tom  1664 Jan 24 10:34 .gitignore
-  drwxrwxr-x  3 tom tom  4096 Jan 24 12:29 .idea
-  -rw-rw-r--  1 tom tom 11357 Jan 24 09:33 LICENSE
-  -rw-r--r--  1 tom tom  4658 Jan 24 12:21 Makefile
-  -rw-rw-r--  1 tom tom 12421 Jan 24 13:13 README.md
-  -rw-r--r--  1 tom tom     7 Jan 24 13:05 VERSION
-  -rw-r--r--  1 tom tom  2291 Jan 24 12:20 bump_version.py
-  drwxrwxr-x  2 tom tom  4096 Jan 24 13:05 dist
-  drwxrwxr-x  5 tom tom  4096 Jan 24 10:38 nodejs
-  -rw-r--r--  1 tom tom   300 Jan 24 13:05 package.json
-  -rw-r--r--  1 tom tom   514 Jan 24 13:05 pyproject.toml
-  drwxr-xr-x  7 tom tom  4096 Jan 24 10:43 python
-  drwxr-xr-x  2 tom tom  4096 Jan 24 10:57 scripts
-  -rwxr-xr-x  1 tom tom   573 Jan 24 10:11 stts
-  drwxrwxr-x  2 tom tom  4096 Jan 24 13:05 stts.egg-info
-  -rwxr-xr-x  1 tom tom   462 Jan 24 10:11 stts.mjs
-  drwxrwxr-x  5 tom tom  4096 Jan 24 10:56 venv
-✓ Command completed in 9.1ms
-[stts] TTS: provider=piper voice=en_US-amy-medium
+[15:26:49] 🎤 Mów (max 8s, VAD)... ✅ VAD stop (3.1s / 3.3s)
+🔎 audio: 3.1s, rms=-35.7dBFS
+[15:26:52] 🔄 Rozpoznawanie... WARNING (VoskAPI:UpdateGrammarFst():recognizer.cc:308) Ignoring word missing in vocabulary: 'chej'
+⚠️ Vosk: grammar returned empty, retry without grammar
+✅ "lista folderów" (1.1s)
+.
+./docs
+./examples
+./.idea
+./.pytest_cache
+./.git
+./scripts
+./nodejs
+./python
+./stts.egg-info
+./dist
+./articles
+./venv
 ```
 
 **Uwaga:** Domyślnie output komend może być buforowany (w zależności od trybu). Jeśli chcesz **zawsze widzieć output na żywo**, użyj `--stream` albo ustaw `STTS_STREAM=1`.

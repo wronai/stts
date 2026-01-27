@@ -68,7 +68,14 @@ run_test "vosk basic" \
   "$PYTHON $STTS --stt-provider vosk --stt-model small-pl --stt-file $SAMPLES/cmd_echo_hello.wav --stt-only 2>/dev/null | tail -1" \
   "hello"
 
-# Test 3: List STT providers
+# Test 3: faster-whisper STT (optional)
+echo ""
+echo "== faster_whisper STT (optional) =="
+run_test "faster_whisper basic" \
+  "$PYTHON $STTS --stt-provider faster_whisper --stt-model base --stt-file $SAMPLES/cmd_echo_hello.wav --stt-only 2>/dev/null | tail -1" \
+  "hello"
+
+# Test 4: List STT providers
 echo ""
 echo "== list-stt =="
 run_test "list-stt" \

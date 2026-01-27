@@ -3516,6 +3516,8 @@ def nlp2cmd_translate(text: str, config: Optional[dict] = None, force: bool = Fa
                 continue
             if l.startswith("📊"):
                 continue
+            if l.lower().startswith("attempting"):
+                continue
             if l.lower().startswith("time:"):
                 continue
             if l.startswith("#"):

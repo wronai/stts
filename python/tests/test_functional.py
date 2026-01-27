@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 import importlib.util
 import importlib.machinery
+from unittest.mock import patch
 
 
 def _load_stts_module(config_dir: str):
@@ -108,6 +109,27 @@ class TestFunctional(unittest.TestCase):
         self.assertTrue(diag.get("ok"))
         self.assertEqual(diag.get("channels"), 1)
         self.assertIn("duration_s", diag)
+
+    def test_nlp2cmd_translate_ignores_attempting(self):
+        stts = self.stts
+
+        old_enabled = os.environ.get("STTS_NLP2CMD_ENABLED")
+        os.environ["STTS_NLP2CMD_ENABLED"] = "1"
+        try:
+            fake = type("R", (), {"stdout": "Attempting something\nls -la\n", "stderr": "", "returncode": 0})()
+            with patch.object(stts.subprocess, "run", return_value=fake):
+                cmd = stts.nlp2cmd_translate("lista folderów", config={}, force=False)
+                self.assertEqual(cmd, "ls -la")
+
+            fake2 = type("R", (), {"stdout": "Attempting something\n", "stderr": "", "returncode": 0})()
+            with patch.object(stts.subprocess, "run", return_value=fake2):
+                cmd2 = stts.nlp2cmd_translate("folderów", config={}, force=False)
+                self.assertIsNone(cmd2)
+        finally:
+            if old_enabled is None:
+                os.environ.pop("STTS_NLP2CMD_ENABLED", None)
+            else:
+                os.environ["STTS_NLP2CMD_ENABLED"] = old_enabled
 
 
 if __name__ == "__main__":

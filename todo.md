@@ -9,14 +9,22 @@
 - [x] Lekkie testy metryk z `examples/bench_metrics.py` (WER/CER/stats)
 - [x] `make test-full` dla `examples/e2e_all.sh` (opcjonalne providery)
 - [x] Testy providerów STT/TTS (`python/tests/test_providers.py`)
-- [ ] Dopisać w `docs/e2e_tests.md` sekcję o `make test-full` + wymaganiach providerów
-- [ ] Rozważyć target `make benchmark-report` z `examples/benchmark.sh` i aktualizacją `docs/benchmark_report.md`
+- [x] Dopisać w `docs/e2e_tests.md` sekcję o `make test-full` + wymaganiach providerów
+- [x] Target `make benchmark-report` z `examples/benchmark.sh` + aktualizacja `docs/benchmark_report.md`
 
 ### 1) Warstwa rdzenia i CLI (Python/Node)
 
 - [ ] Wydzielić core pipeline: config → STT → normalize → NLP2CMD → execute → TTS
 - [ ] Ujednolicić API i argumenty CLI (parytet flag) w Python/Node; spisać rozbieżności
 - [ ] Uporządkować konfigurację (env/config/CLI) w obu implementacjach: walidacja, defaulty, log startu
+
+#### Kolejne kroki (po pierwszym refaktorze w `python/stts`)
+
+- [ ] Przenieść wydzielone funkcje pipeline do modułu (np. `python/stts_core/`) i zostawić w `python/stts` tylko CLI + dispatch
+- [ ] Wprowadzić jeden kontrakt „pipeline request/response” (np. struktura z `text`, `cmd`, `translated_cmd`, `out`, `exit_code`, `tts_text`)
+- [ ] Ujednolicić tryby wejścia (STT, stdin, placeholder) jako strategie: `InputSource`
+- [ ] Ujednolicić egzekucję jako osobną warstwę (`CommandRunner`): dry-run, safe-mode, stream/no-stream
+- [ ] Dodać „compat table” Python vs Node i dopisać brakujące flagi po stronie Node (albo wyciąć nieobsługiwane z opisu)
 
 ### 2) Provider abstraction + wydajność
 
@@ -79,5 +87,7 @@ Cel: poprawić niezawodność wykonywania komend, gdy STT zwraca tekst z błęda
 
 ## Dokumentacja + stabilność
 
-- [ ] Utrzymać spójny opis opcji CLI i `.env` w root + w `python/` i `nodejs/`.
+- [x] Utrzymać spójny opis opcji CLI i `.env` w root + w `python/` i `nodejs/`.
+- [x] Dopisać i utrzymać docs providerów: `docs/stt_providers.md`, `docs/tts_providers.md`.
+- [x] STT: dodać i opisać `faster_whisper` (Python) + przykłady i benchmark toggle.
 - [ ] Dopisać krótkie "FAQ" o: streaming output, fast-start, GPU layers, wybór TTS providerów.

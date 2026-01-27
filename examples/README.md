@@ -2,6 +2,11 @@
 
 This folder contains runnable E2E (end-to-end) test scripts.
 
+Provider docs:
+
+- [stt_providers.md](../docs/stt_providers.md)
+- [tts_providers.md](../docs/tts_providers.md)
+
 ## Quick Start
 
 ```bash
@@ -115,7 +120,7 @@ export STTS_TTS_NO_PLAY=1
 
 | Script | Description | Requirements |
 |--------|-------------|--------------|
-| `e2e_stt.sh` | Tests STT providers (whisper_cpp, vosk) | `make stt-vosk-pl` |
+| `e2e_stt.sh` | Tests STT providers (whisper_cpp, vosk, optional faster_whisper) | `make stt-vosk-pl` |
 | `e2e_tts.sh` | Tests TTS providers (piper, espeak) | `make tts-piper-pl` |
 | `e2e_pipeline.sh` | Full pipeline: STT → Execute → TTS | Both STT+TTS |
 | `e2e_streaming.sh` | Streaming input/output modes | Basic setup |
