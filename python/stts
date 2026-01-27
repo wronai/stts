@@ -60,6 +60,13 @@ def _yaml_out():
 def _text_out():
     return sys.stderr if _yaml_mode() else sys.stdout
 
+
+def _stdout_isatty() -> bool:
+    try:
+        return sys.__stdout__.isatty() if _yaml_mode() else sys.stdout.isatty()
+    except Exception:
+        return False
+
 HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
@@ -272,6 +279,7 @@ def emit_stt_event_yaml(text: str, *, action: str, translated: Optional[str] = N
         if v in ("0", "false", "no", "n"):
             return
         out = _yaml_out()
+        out.write("---\n")
         out.write(build_stt_event_yaml(text, action=action, translated=translated, reason=reason))
         out.flush()
     except BrokenPipeError:
@@ -595,6 +603,7 @@ def emit_startup_yaml(config: dict) -> None:
         else:
             force_stdout = os.environ.get("STTS_STARTUP_YAML_STDOUT", "0").strip().lower() in ("1", "true", "yes", "y")
             out = sys.stdout if (force_stdout or sys.stdout.isatty()) else sys.stderr
+        out.write("---\n")
         out.write(build_startup_yaml(config))
         out.flush()
     except BrokenPipeError:
@@ -4468,14 +4477,15 @@ class VoiceShell:
                     cmd = self.listen()
                     if not cmd:
                         continue
-                    emit_stt_event_yaml(cmd, action="recognized", translated=None, reason=None)
                     translated = nlp2cmd_translate(cmd, config=self.config)
                     if (not translated) and _looks_like_natural_language(cmd):
                         translated = nlp2cmd_translate(cmd, config=self.config, force=True)
                     if translated:
                         if nlp2cmd_confirm(translated):
+                            emit_stt_event_yaml(cmd, action="execute", translated=translated, reason=None)
                             cmd = translated
                         else:
+                            emit_stt_event_yaml(cmd, action="skipped", translated=translated, reason="confirm_declined")
                             continue
                     else:
                         allow_raw = os.environ.get("STTS_EXEC_RAW_STT", "0").strip().lower() in ("1", "true", "yes", "y")
@@ -5048,7 +5058,7 @@ def main():
         config["stt_model"] = stt_model_arg
 
     if (not stt_once) and (not stt_file) and (not rest) and (not tts_stdin) and (not tts_test_flag) and (not setup) and (not init):
-        if sys.stdin.isatty() and (not sys.stdout.isatty()):
+        if sys.stdin.isatty() and (not _stdout_isatty()):
             stt_once = True
 
     # CLI --safe-mode overrides config

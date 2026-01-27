@@ -126,22 +126,7 @@ def run_stt_stream_shell(deps: PipelineDeps, shell, config, stt_file, stream_she
                 shell.tts.speak(lines[-1][:200])
 
             if one_shot:
-                if _yaml_mode():
-        try:
-            _yaml_out().write("\n".join([
-                "event:",
-                "  type: nlp2cmd",
-                f"  text: {_yaml_quote_scalar(text)}",
-                "  ok: true",
-                f"  command: {_yaml_quote_scalar(translated)}",
-                "  run: true",
-                "  dry_run: false",
-                f"  exit_code: {int(code)}",
-            ]) + "\n")
-            _yaml_out().flush()
-        except BrokenPipeError:
-            return 0
-    return code
+                return code
         except KeyboardInterrupt:
             print("", file=sys.stderr)
             if one_shot:
@@ -157,7 +142,7 @@ def run_stt_once(deps: PipelineDeps, shell, stt_file):
     if text:
         if _yaml_mode():
             try:
-                _yaml_out().write("\n".join([
+                _yaml_out().write("---\n" + "\n".join([
                     "event:",
                     "  type: stt",
                     f"  text: {_yaml_quote_scalar(text)}",
@@ -199,7 +184,7 @@ def run_nlp2cmd_parallel_fastpath(deps: PipelineDeps, config, shell, stt_file, s
     if dry_run:
         if _yaml_mode():
             try:
-                _yaml_out().write("\n".join([
+                _yaml_out().write("---\n" + "\n".join([
                     "event:",
                     "  type: nlp2cmd",
                     f"  text: {_yaml_quote_scalar(text)}",
@@ -226,6 +211,21 @@ def run_nlp2cmd_parallel_fastpath(deps: PipelineDeps, config, shell, stt_file, s
     out, code, printed = shell.run_command_any(translated)
     if out.strip() and not printed:
         print(out, end="", flush=True)
+    if _yaml_mode():
+        try:
+            _yaml_out().write("---\n" + "\n".join([
+                "event:",
+                "  type: nlp2cmd",
+                f"  text: {_yaml_quote_scalar(text)}",
+                "  ok: true",
+                f"  command: {_yaml_quote_scalar(translated)}",
+                "  run: true",
+                "  dry_run: false",
+                f"  exit_code: {int(code)}",
+            ]) + "\n")
+            _yaml_out().flush()
+        except BrokenPipeError:
+            return 0
     return code
 
 
@@ -320,7 +320,7 @@ def run_nlp2cmd_stdin_mode(deps: PipelineDeps, config, shell, rest, dry_run):
     if not translated:
         if _yaml_mode():
             try:
-                _yaml_out().write("\n".join([
+                _yaml_out().write("---\n" + "\n".join([
                     "event:",
                     "  type: nlp2cmd",
                     f"  text: {_yaml_quote_scalar(text)}",
@@ -337,7 +337,7 @@ def run_nlp2cmd_stdin_mode(deps: PipelineDeps, config, shell, rest, dry_run):
     if not run_mode:
         if _yaml_mode():
             try:
-                _yaml_out().write("\n".join([
+                _yaml_out().write("---\n" + "\n".join([
                     "event:",
                     "  type: nlp2cmd",
                     f"  text: {_yaml_quote_scalar(text)}",
@@ -353,6 +353,23 @@ def run_nlp2cmd_stdin_mode(deps: PipelineDeps, config, shell, rest, dry_run):
         return 0
 
     if dry_run:
+        if _yaml_mode():
+            try:
+                _yaml_out().write("\n".join([
+                    "---",
+                    "event:",
+                    "  type: nlp2cmd",
+                    f"  text: {_yaml_quote_scalar(text)}",
+                    "  ok: true",
+                    f"  command: {_yaml_quote_scalar(translated)}",
+                    "  run: true",
+                    "  dry_run: true",
+                    "  exit_code: 0",
+                ]) + "\n")
+                _yaml_out().flush()
+            except BrokenPipeError:
+                return 0
+            return 0
         print(translated)
         return 0
 
@@ -365,5 +382,20 @@ def run_nlp2cmd_stdin_mode(deps: PipelineDeps, config, shell, rest, dry_run):
         return 0 if reason == "dry-run" else 1
     out, code, printed = shell.run_command_any(translated)
     if out.strip() and not printed:
-        print(out, end="", flush=True)
+        print(out, end="", flush=True, file=(sys.stderr if _yaml_mode() else sys.stdout))
+    if _yaml_mode():
+        try:
+            _yaml_out().write("---\n" + "\n".join([
+                "event:",
+                "  type: nlp2cmd",
+                f"  text: {_yaml_quote_scalar(text)}",
+                "  ok: true",
+                f"  command: {_yaml_quote_scalar(translated)}",
+                "  run: true",
+                "  dry_run: false",
+                f"  exit_code: {int(code)}",
+            ]) + "\n")
+            _yaml_out().flush()
+        except BrokenPipeError:
+            return 0
     return code
