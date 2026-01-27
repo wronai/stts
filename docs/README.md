@@ -10,6 +10,7 @@ Additional documents:
 - `docs/stt_providers.md` – STT providers (what is implemented today + optional/roadmap ideas)
 - `docs/tts_providers.md` – TTS providers (what is implemented today + optional/roadmap ideas)
 - `docs/e2e_tests.md` – how to run repeatable E2E tests (offline + optional online)
+- `docs/core_pipeline_next_steps.md` – next refactor steps (pipeline modularization + API parity)
 
 Examples:
 
