@@ -8,6 +8,7 @@
 - [x] Node.js CLI smoke tests w `nodejs/tests/docker_test.sh` (bez interakcji, opcjonalne generowanie próbek)
 - [x] Lekkie testy metryk z `examples/bench_metrics.py` (WER/CER/stats)
 - [x] `make test-full` dla `examples/e2e_all.sh` (opcjonalne providery)
+- [x] Testy providerów STT/TTS (`python/tests/test_providers.py`)
 - [ ] Dopisać w `docs/e2e_tests.md` sekcję o `make test-full` + wymaganiach providerów
 - [ ] Rozważyć target `make benchmark-report` z `examples/benchmark.sh` i aktualizacją `docs/benchmark_report.md`
 

@@ -1,6 +1,6 @@
 {
   "name": "stts",
-  "version": "0.1.31",
+  "version": "0.1.32",
   "description": "Universal STT/TTS Shell Wrapper (Node.js)",
   "type": "module",
   "bin": {
