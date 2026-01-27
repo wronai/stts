@@ -195,7 +195,12 @@ def run_pipe_dry_run() -> int:
 
 def run_nlp2cmd_stdin_mode(deps: PipelineDeps, config, shell, rest, dry_run):
     bin_name = os.environ.get("STTS_NLP2CMD_BIN", "nlp2cmd")
-    if not (rest and rest[0] == bin_name and (not sys.stdin.isatty()) and any(a == "stdin" for a in rest[1:])):
+    if not (
+        rest
+        and rest[0] == bin_name
+        and (not sys.stdin.isatty())
+        and any(a in ("stdin", "--stdin") for a in rest[1:])
+    ):
         return None
 
     run_mode = ("-r" in rest) or ("--run" in rest)

@@ -24,6 +24,24 @@ import { createWriteStream } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+function getActivePulseDevices() {
+    try {
+        const src = execSync('pactl get-default-source', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 1500 })
+            .trim()
+            .split('\n')
+            .pop()
+            .trim();
+        const sink = execSync('pactl get-default-sink', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 1500 })
+            .trim()
+            .split('\n')
+            .pop()
+            .trim();
+        return { source: src || null, sink: sink || null };
+    } catch {
+        return { source: null, sink: null };
+    }
+}
+
 function loadDotenv() {
     const candidates = [];
 
@@ -80,6 +98,9 @@ const DEFAULT_CONFIG = {
     stream_cmd: false,
     fast_start: true,
     nlp2cmd_parallel: false,
+    mic_device: null,
+    speaker_device: null,
+    audio_auto_switch: true,
 };
 
 function applyEnvOverrides(config) {
@@ -119,6 +140,18 @@ function applyEnvOverrides(config) {
         const v = String(process.env.STTS_FAST_START).trim().toLowerCase();
         config.fast_start = !['0', 'false', 'no', 'n'].includes(v);
     }
+    if (process.env.STTS_MIC_DEVICE) {
+        const v = String(process.env.STTS_MIC_DEVICE).trim();
+        config.mic_device = ['0', 'auto', ''].includes(v) ? null : v;
+    }
+    if (process.env.STTS_SPEAKER_DEVICE) {
+        const v = String(process.env.STTS_SPEAKER_DEVICE).trim();
+        config.speaker_device = ['0', 'auto', ''].includes(v) ? null : v;
+    }
+    if (process.env.STTS_AUDIO_AUTO_SWITCH) {
+        const v = String(process.env.STTS_AUDIO_AUTO_SWITCH).trim().toLowerCase();
+        config.audio_auto_switch = !['0', 'false', 'no', 'n'].includes(v);
+    }
     if (process.env.STTS_NLP2CMD_PARALLEL) {
         const v = String(process.env.STTS_NLP2CMD_PARALLEL).trim().toLowerCase();
         config.nlp2cmd_parallel = !['0', 'false', 'no', 'n'].includes(v);
@@ -139,6 +172,63 @@ const Colors = {
 
 function cprint(color, text, newline = true) {
     process.stdout.write(`${color}${text}${Colors.NC}${newline ? '\n' : ''}`);
+}
+
+function yamlFmtScalar(v) {
+    if (v === null || v === undefined) return 'null';
+    if (typeof v === 'boolean') return v ? 'true' : 'false';
+    if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'null';
+    const s = String(v);
+    if (s === '') return '""';
+    const needsQuote = /\s/.test(s) || /[:#"']/.test(s);
+    if (needsQuote) return `"${s.replace(/\\/g, '\\\\').replace(/\"/g, '\\"')}"`;
+    return s;
+}
+
+function buildStartupYaml(config) {
+    const sttProvider = config?.stt_provider ?? null;
+    const sttModel = config?.stt_model ?? null;
+    const ttsProvider = config?.tts_provider ?? null;
+    const ttsVoice = config?.tts_voice ?? null;
+
+    const micCfg = config?.mic_device ?? null;
+    const speakerCfg = config?.speaker_device ?? null;
+    const audioAutoSwitch = config?.audio_auto_switch ?? null;
+
+    const micCfgV = micCfg ? micCfg : 'auto';
+    const speakerCfgV = speakerCfg ? speakerCfg : 'auto';
+
+    const pulse = platform() === 'linux' ? getActivePulseDevices() : { source: null, sink: null };
+    return [
+        'selected_models:',
+        '  stt:',
+        `    provider: ${yamlFmtScalar(sttProvider)}`,
+        `    model: ${yamlFmtScalar(sttModel)}`,
+        '  tts:',
+        `    provider: ${yamlFmtScalar(ttsProvider)}`,
+        `    voice: ${yamlFmtScalar(ttsVoice)}`,
+        'io:',
+        '  input:',
+        '    - type: microphone',
+        `      config: ${yamlFmtScalar(micCfgV)}`,
+        `      pulse_default_source: ${yamlFmtScalar(pulse.source)}`,
+        '  output:',
+        '    - type: speaker',
+        `      config: ${yamlFmtScalar(speakerCfgV)}`,
+        `      pulse_default_sink: ${yamlFmtScalar(pulse.sink)}`,
+        `  audio_auto_switch: ${yamlFmtScalar(audioAutoSwitch)}`,
+        '',
+    ].join('\n');
+}
+
+function emitStartupYaml(config) {
+    try {
+        const v = String(process.env.STTS_STARTUP_YAML || '1').trim().toLowerCase();
+        if (['0', 'false', 'no', 'n'].includes(v)) return;
+        const forceStdout = ['1', 'true', 'yes', 'y'].includes(String(process.env.STTS_STARTUP_YAML_STDOUT || '0').trim().toLowerCase());
+        const out = (forceStdout || process.stdout.isTTY) ? process.stdout : process.stderr;
+        out.write(buildStartupYaml(config));
+    } catch {}
 }
 
 const SHELL_CORRECTIONS = {
@@ -515,10 +605,20 @@ async function nlp2cmdTranslate(text, { config = null, force = false } = {}) {
     for (const l of lines) {
         if (l.startsWith('```')) continue;
         if (l.startsWith('📊')) continue;
-        if (/^\$\s/.test(l)) return l.replace(/^\$\s*/, '');
-        if (/[;&|]/.test(l) || l.includes(' ') || /^[a-zA-Z0-9_-]+$/.test(l)) return l;
+
+        const low = l.toLowerCase();
+        if (low.includes('litellm')) continue;
+        if (low.startsWith('attempting')) continue;
+        if (low.startsWith('time:')) continue;
+        if (l.startsWith('#')) continue;
+        if (l.startsWith('Usage:') || l.startsWith("Try '") || l.startsWith('Error:')) continue;
+        if (l.startsWith('/bin/') && low.includes('command not found')) continue;
+        if (l.startsWith('/bin/bash:') || l.startsWith('bash:')) continue;
+
+        if (/^\$\s/.test(l)) return l.replace(/^\$\s*/, '').trim();
+        if (/^[a-zA-Z0-9_./-]+(\s+.+)?$/.test(l)) return l.trim();
     }
-    return lines[0];
+    return null;
 }
 
 function nlp2cmdConfirm(cmd) {
@@ -1450,6 +1550,8 @@ async function main() {
     if (ttsProvider !== null || ttsVoice !== null || streamCmd !== null || fastStart !== null || nlp2cmdParallel !== null) {
         saveConfig(config);
     }
+
+    emitStartupYaml(config);
 
     if (sttFile) {
         nlp2cmdPrewarm(config);

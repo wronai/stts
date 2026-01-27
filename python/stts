@@ -58,6 +58,9 @@ from stts_core.pipeline_helpers import (
     run_stt_stream_shell,
 )
 
+from stts_core.pipeline_utils import argv_to_cmd as _argv_to_cmd_core
+from stts_core.pipeline_utils import expand_placeholders as _expand_placeholders_core
+
 
 def load_dotenv() -> None:
     candidates = []
@@ -481,6 +484,79 @@ def _dump_simple_yaml(data: dict) -> str:
             continue
         lines.append(f"{k}: {fmt(data[k])}")
     return "\n".join(lines) + "\n"
+
+
+def _yaml_fmt_scalar(v: Any) -> str:
+    if v is None:
+        return "null"
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return str(v)
+    s = str(v)
+    if s == "":
+        return "\"\""
+    needs_quote = any(ch.isspace() for ch in s) or any(ch in s for ch in (":", "#", "\"", "'"))
+    if needs_quote:
+        s2 = s.replace("\\", "\\\\").replace("\"", "\\\"")
+        return f"\"{s2}\""
+    return s
+
+
+def build_startup_yaml(config: dict) -> str:
+    stt_provider = config.get("stt_provider")
+    stt_model = config.get("stt_model")
+    tts_provider = config.get("tts_provider")
+    tts_voice = config.get("tts_voice")
+
+    mic_cfg = config.get("mic_device")
+    speaker_cfg = config.get("speaker_device")
+    audio_auto_switch = config.get("audio_auto_switch")
+
+    mic_cfg_v = "auto" if mic_cfg in (None, "", "auto") else mic_cfg
+    speaker_cfg_v = "auto" if speaker_cfg in (None, "", "auto") else speaker_cfg
+
+    pulse_src = None
+    pulse_sink = None
+    try:
+        if platform.system().lower() == "linux":
+            pulse_src, pulse_sink = get_active_pulse_devices()
+    except Exception:
+        pulse_src, pulse_sink = None, None
+
+    lines = [
+        "selected_models:",
+        "  stt:",
+        f"    provider: {_yaml_fmt_scalar(stt_provider)}",
+        f"    model: {_yaml_fmt_scalar(stt_model)}",
+        "  tts:",
+        f"    provider: {_yaml_fmt_scalar(tts_provider)}",
+        f"    voice: {_yaml_fmt_scalar(tts_voice)}",
+        "io:",
+        "  input:",
+        "    - type: microphone",
+        f"      config: {_yaml_fmt_scalar(mic_cfg_v)}",
+        f"      pulse_default_source: {_yaml_fmt_scalar(pulse_src)}",
+        "  output:",
+        "    - type: speaker",
+        f"      config: {_yaml_fmt_scalar(speaker_cfg_v)}",
+        f"      pulse_default_sink: {_yaml_fmt_scalar(pulse_sink)}",
+        f"  audio_auto_switch: {_yaml_fmt_scalar(audio_auto_switch)}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def emit_startup_yaml(config: dict) -> None:
+    try:
+        v = os.environ.get("STTS_STARTUP_YAML", "1").strip().lower()
+        if v in ("0", "false", "no", "n"):
+            return
+        force_stdout = os.environ.get("STTS_STARTUP_YAML_STDOUT", "0").strip().lower() in ("1", "true", "yes", "y")
+        out = sys.stdout if (force_stdout or sys.stdout.isatty()) else sys.stderr
+        out.write(build_startup_yaml(config))
+        out.flush()
+    except BrokenPipeError:
+        return
 
 
 def _run_text(cmd: List[str], timeout: int = 3) -> str:
@@ -3531,6 +3607,8 @@ def nlp2cmd_translate(text: str, config: Optional[dict] = None, force: bool = Fa
                 continue
             if l.startswith("📊"):
                 continue
+            if "litellm" in l.lower():
+                continue
             if l.lower().startswith("attempting"):
                 continue
             if l.lower().startswith("time:"):
@@ -3538,6 +3616,10 @@ def nlp2cmd_translate(text: str, config: Optional[dict] = None, force: bool = Fa
             if l.startswith("#"):
                 continue
             if l.startswith("Usage:") or l.startswith("Try '") or l.startswith("Error:"):
+                continue
+            if l.startswith("/bin/") and "command not found" in l.lower():
+                continue
+            if l.startswith("/bin/bash:") or l.startswith("bash:"):
                 continue
             if l.startswith("Generating") or l.startswith("Detected") or l.startswith("✓"):
                 continue
@@ -4828,31 +4910,25 @@ def quick_init(init: str) -> dict:
 
 
 def argv_to_cmd(args: List[str]) -> str:
-    if os.name == "nt":
-        return subprocess.list2cmdline([str(a) for a in (args or [])])
-    try:
-    text = None
-    if needs_stt:
-        stt_used = True
-        # Listen for speech input
-        with contextlib.redirect_stdout(sys.stderr):
-            text = shell.listen(stt_file=stt_file) if stt_file else shell.listen()
-        if not text:
-            cprint(Colors.RED, "❌ No speech input captured")
-            return None
+    return _argv_to_cmd_core(args)
 
-    for arg in args:
-        if text is not None:
-            expanded_arg = arg.replace("{STT}", text).replace("{STT_STREAM}", text)
-            expanded.append(expanded_arg)
-        else:
-            expanded.append(arg)
 
-    if stt_used and config.get("auto_tts", True) and shell.tts:
-        # If STT was used, speak the final command
-        cmd = argv_to_cmd(expanded)
-        shell.tts.speak(cmd[:200])
-    
+def expand_placeholders(args, shell, config, stt_file=None):
+    """Expand placeholders like {STT} in command arguments."""
+    class _Deps:
+        pass
+
+    deps = _Deps()
+    deps.cprint = cprint
+    deps.Colors = Colors
+    deps.argv_to_cmd = argv_to_cmd
+
+    # Listen for speech input
+    expanded = _expand_placeholders_core(deps, args, shell, config, stt_file=stt_file)
+    if expanded is None:
+        return None
+
+    # If STT was used, speak the final command
     return expanded
 
 
@@ -5022,6 +5098,7 @@ def main():
     ):
         config = interactive_setup()
 
+    emit_startup_yaml(config)
     shell = VoiceShell(config)
 
     if tts_test_flag:
