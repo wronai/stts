@@ -1,0 +1,153 @@
+project: python
+generated: "2026-01-27T10:11:58.648148"
+modules[1]{path,lang,items}:
+  stts,python,145
+
+function_details:
+  stts:
+    functions[145]{name,kind,sig,loc,async,lines,cc,does}:
+      load_dotenv,function,() -> None,47-77,false,31,12,retrieves dotenv
+      apply_env_overrides,function,"(config:dict) -> dict",127-203,false,77,42,apply env overrides
+      cprint,function,"(color:str, text:str, end:str='\\n') -> None",217-221,false,5,2,cprint
+      _download_progress,function,"(count, block_size, total_size) -> None",224-226,false,3,2,download progress
+      detect_system,function,"(fast:bool=False) -> SystemInfo",246-322,false,77,22,detect system
+      load_config,function,() -> dict,325-338,false,14,5,retrieves config
+      save_config,function,"(config:dict) -> None",341-347,false,7,2,caches config
+      _normalize_config_format,function,"(v:Optional[str]) -> Optional[str]",350-358,false,9,4,normalize config format
+      _get_config_file_for_load,function,"() -> Optional[Path]",361-379,false,19,8,retrieves config file for load
+      _get_config_file_for_save,function,() -> Path,382-399,false,18,8,retrieves config file for save
+      _parse_simple_yaml,function,"(text:str) -> dict",402-442,false,41,18,"Very small YAML subset parser for flat key: value maps."
+      _dump_simple_yaml,function,"(data:dict) -> str",445-468,false,24,3,"Dump flat dict to YAML (simple key: value)."
+      _run_text,function,"(cmd:List[str], timeout:int=3) -> str",471-476,false,6,4,starts text
+      list_capture_devices_linux,function,"() -> List[Tuple[str, str]]",479-519,false,41,14,list capture devices linux
+      list_playback_devices_linux,function,"() -> List[Tuple[str, str]]",522-560,false,39,14,list playback devices linux
+      get_active_pulse_devices,function,"() -> Tuple[Optional[str], Optional[str]]",563-574,false,12,4,retrieves active pulse devices
+      analyze_wav,function,"(path:str) -> dict",577-649,false,73,20,processes wav
+      choose_device_interactive,function,"(title:str, devices:List[Tuple[str,str]]) -> Optional[str]",652-670,false,19,9,choose device interactive
+      _download_progress,function,"(count, block_size, total_size) -> None",673-675,false,3,2,download progress
+      detect_system,function,"(fast:bool=False) -> SystemInfo",695-771,false,77,22,detect system
+      load_config,function,() -> dict,774-787,false,14,5,retrieves config
+      save_config,function,"(config:dict) -> None",790-796,false,7,2,caches config
+      _normalize_config_format,function,"(v:Optional[str]) -> Optional[str]",799-807,false,9,4,normalize config format
+      _get_config_file_for_load,function,"() -> Optional[Path]",810-828,false,19,8,retrieves config file for load
+      _get_config_file_for_save,function,() -> Path,831-848,false,18,8,retrieves config file for save
+      _parse_simple_yaml,function,"(text:str) -> dict",851-891,false,41,18,"Very small YAML subset parser for flat key: value maps."
+      _dump_simple_yaml,function,"(data:dict) -> str",894-917,false,24,3,"Dump flat dict to YAML (simple key: value)."
+      _run_text,function,"(cmd:List[str], timeout:int=3) -> str",920-925,false,6,4,starts text
+      list_capture_devices_linux,function,"() -> List[Tuple[str, str]]",928-968,false,41,14,list capture devices linux
+      list_playback_devices_linux,function,"() -> List[Tuple[str, str]]",971-1009,false,39,14,list playback devices linux
+      get_active_pulse_devices,function,"() -> Tuple[Optional[str], Optional[str]]",1012-1023,false,12,4,retrieves active pulse devices
+      analyze_wav,function,"(path:str) -> dict",1026-1098,false,73,20,processes wav
+      choose_device_interactive,function,"(title:str, devices:List[Tuple[str,str]]) -> Optional[str]",1101-1119,false,19,9,choose device interactive
+      _arecord_raw,function,"(device:Optional[str], seconds:float, rate:int=16000) -> bytes",1122-1144,false,23,4,arecord raw
+      _rms_dbfs_s16le,function,"(raw:bytes) -> float",1147-1161,false,15,6,rms dbfs s16le
+      mic_meter,function,"(devices:List[Tuple[str,str]], seconds:float=0.8, loops:int=0) -> dict",1164-1195,false,32,12,mic meter
+      auto_detect_mic,function,"(devices:List[Tuple[str,str]], seconds:float=0.8, rounds:int=2) -> Optional[str]",1198-1213,false,16,7,auto detect mic
+      _ts,function,() -> str,2945-2947,false,3,1,Return current timestamp for logging.
+      record_audio_vad,function,"(max_duration:float=5.0, output_path:str='/tmp/stts_audio.wav', device:Optional[str]=None, silence_ms:int=800, threshold_db:float=-45.0, rate:int=16000) -> str",2950-3044,false,95,17,"Record with VAD: stop early after silence_ms of silence below threshold_db."
+      record_audio,function,"(duration:int=2, output_path:str='/tmp/stts_audio.wav', device:Optional[str]=None) -> str",3047-3085,false,39,7,"Fixed-duration recording (legacy, use record_audio_vad for better UX)."
+      interactive_setup,function,() -> dict,3088-3203,false,116,40,interactive setup
+      is_dangerous_command,function,"(cmd:str) -> Tuple[bool, str]",3246-3252,false,7,3,Check if command matches dangerous patterns.
+      is_sql_command,function,"(cmd:str) -> bool",3255-3260,false,6,3,Check if command looks like SQL (not shell).
+      check_command_safety,function,"(cmd:str, config:dict, dry_run:bool) -> Tuple[bool, str]",3263-3295,false,33,12,checks command safety
+      _resolve_nlp2cmd_python,function,() -> str,3301-3329,false,29,8,resolve nlp2cmd python
+      nlp2cmd_prewarm,function,"(config:Optional[dict]=None) -> None",3332-3341,false,10,4,nlp2cmd prewarm
+      nlp2cmd_prewarm_force,function,() -> None,3344-3351,false,8,3,nlp2cmd prewarm force
+      nlp2cmd_translate,function,"(text:str, config:Optional[dict]=None, force:bool=False) -> Optional[str]",3354-3449,false,96,45,nlp2cmd translate
+      nlp2cmd_confirm,function,"(cmd:str) -> bool",3452-3457,false,6,2,nlp2cmd confirm
+      _nlp2cmd_parallel_enabled,function,"(config:Optional[dict]) -> bool",3557-3563,false,7,4,nlp2cmd parallel enabled
+      check_wake_word,function,"(text:str, patterns:Optional[List[str]]=None) -> Tuple[bool, str]",3585-3604,false,20,7,Check if text starts with wake word.
+      _wake_word_phrase_to_pattern,function,"(phrase:str) -> Optional[str]",3607-3617,false,11,7,wake word phrase to pattern
+      generate_wake_word_variants,function,"(phrase:str, max_variants:int=24) -> List[str]",3620-3687,false,68,13,creates wake word variants
+      normalize_daemon_command,function,"(text:str) -> str",3690-3711,false,22,4,Heurystyczna normalizacja komendy po wake-word (pod STT).
+      _parse_trigger_spec,function,"(spec:str) -> Optional[Tuple[str, str, bool]]",3714-3733,false,20,9,Parse trigger specification.
+      load_triggers,function,"(trigger_specs:Optional[List[str]]=None, triggers_file:Optional[str]=None) -> List[Tuple[str, str, bool]]",3736-3757,false,22,12,retrieves triggers
+      match_trigger,function,"(text:str, rules:List[Tuple[str,str,bool]]) -> Optional[str]",3760-3775,false,16,9,Return command if any trigger matches.
+      nlp2cmd_service_query,function,"(query:str, url:str='http://localhost:8000', execute:bool=True, timeout:float=30.0) -> Optional[Dict[str, Any]]",3778-3811,false,34,3,Query nlp2cmd HTTP service.
+      nlp2cmd_service_health,function,"(url:str, timeout:float=2.5) -> bool",3814-3826,false,13,4,Check if nlp2cmd service is reachable via GET /health.
+      parse_args,function,"(argv:List[str]) -> None",4503-4634,false,132,48,parses args
+      tts_test,function,"(shell:VoiceShell, text:str) -> int",4637-4647,false,11,4,tts test
+      tts_from_stdin,function,"(shell:VoiceShell) -> int",4650-4672,false,23,10,tts from stdin
+      apply_quick_tts,function,"(config:dict, tts_provider:Optional[str], tts_voice:Optional[str]) -> dict",4675-4684,false,10,7,apply quick tts
+      quick_init,function,"(init:str) -> dict",4687-4715,false,29,12,quick init
+      argv_to_cmd,function,"(args:List[str]) -> str",4718-4724,false,7,9,argv to cmd
+      expand_placeholders,function,"(args:List[str], shell:VoiceShell, config:dict, stt_file:Optional[str]=None) -> Optional[List[str]]",4727-4755,false,29,11,"Expand placeholders like {STT} in command arguments."
+      main,function,() -> None,4758-5176,false,419,201,main
+      TextNormalizer.normalize,method,"(text:str, language:str='pl') -> str",1460-1479,false,20,5,"Normalizuje tekst STT - usuwa błędy, poprawia komendy."
+      TextNormalizer._fix_phonetic_english,method,"(text:str, language:str='pl') -> str",1482-1510,false,29,10,Poprawia angielskie słowa techniczne zapisane fonetycznie po polsku.
+      TextNormalizer._fuzzy_phonetic_replacement,method,"(clean:str) -> Optional[str]",1514-1542,false,29,14,fuzzy phonetic replacement
+      STTProvider.is_available,method,"(info:SystemInfo) -> None",1552-1553,false,2,1,checks available
+      STTProvider.install,method,"(info:SystemInfo) -> bool",1556-1557,false,2,1,install
+      STTProvider.get_recommended_model,method,"(info:SystemInfo) -> Optional[str]",1560-1561,false,2,1,retrieves recommended model
+      STTProvider.__init__,method,"(model:Optional[str]=None, language:str='pl', config:Optional[dict]=None, info:Optional[SystemInfo]=None) -> None",1563-1573,false,11,2,creates
+      STTProvider.transcribe,method,"(audio_path:str) -> str",1575-1576,false,2,1,transcribe
+      WhisperCppSTT.is_available,method,"(info:SystemInfo) -> None",1592-1606,false,15,6,checks available
+      WhisperCppSTT.get_recommended_model,method,"(info:SystemInfo) -> str",1609-1618,false,10,5,retrieves recommended model
+      WhisperCppSTT._detect_cuda,method,() -> bool,1621-1630,false,10,2,Sprawdź czy CUDA toolkit jest dostępny.
+      WhisperCppSTT._has_gpu_build,method,() -> bool,1633-1636,false,4,1,Sprawdź czy whisper.cpp zbudowano z GPU.
+      WhisperCppSTT.install,method,"(info:SystemInfo, force_gpu:Optional[bool]=None) -> bool",1639-1692,false,54,10,install
+      WhisperCppSTT.download_model,method,"(model_name:str) -> Optional[Path]",1695-1729,false,35,14,download model
+      WhisperCppSTT._help_text,method,"(whisper_bin:str) -> str",1733-1747,false,15,6,help text
+      WhisperCppSTT._is_short_audio,method,"(audio_path:str, max_seconds:float=8.0) -> bool",1750-1762,false,13,5,checks short audio
+      WhisperCppSTT._supports_help_token,method,"(whisper_bin:str, token:str) -> bool",1766-1767,false,2,1,supports help token
+      WhisperCppSTT._detect_prompt_flag,method,"(whisper_bin:str) -> Optional[str]",1771-1777,false,7,3,detect prompt flag
+      WhisperCppSTT.transcribe,method,"(audio_path:str) -> str",1779-1957,false,179,88,transcribe
+      DeepgramSTT.is_available,method,"(info:SystemInfo) -> None",1966-1970,false,5,2,checks available
+      DeepgramSTT.get_recommended_model,method,"(info:SystemInfo) -> Optional[str]",1973-1974,false,2,1,retrieves recommended model
+      DeepgramSTT.transcribe,method,"(audio_path:str) -> str",1976-2035,false,60,20,transcribe
+      VoskSTT.is_available,method,"(info:SystemInfo) -> None",2051-2063,false,13,4,checks available
+      VoskSTT.install,method,"(info:SystemInfo) -> bool",2066-2090,false,25,5,install
+      VoskSTT.download_model,method,"(model_name:str) -> Optional[Path]",2093-2150,false,58,17,download model
+      VoskSTT.get_recommended_model,method,"(info:SystemInfo) -> Optional[str]",2153-2154,false,2,1,retrieves recommended model
+      VoskSTT._find_model_path,method,"() -> Optional[Path]",2156-2193,false,38,8,Find vosk model directory.
+      VoskSTT.transcribe,method,"(audio_path:str) -> str",2195-2315,false,121,30,transcribe
+      TTSProvider.is_available,method,"(info:SystemInfo) -> None",2322-2323,false,2,1,checks available
+      TTSProvider.install,method,"(info:SystemInfo) -> bool",2326-2327,false,2,1,install
+      TTSProvider.__init__,method,"(voice:str='pl', config:Optional[dict]=None, info:Optional[SystemInfo]=None) -> None",2329-2332,false,4,2,creates
+      TTSProvider.speak,method,"(text:str) -> None",2334-2335,false,2,1,speak
+      EspeakTTS.is_available,method,"(info:SystemInfo) -> None",2342-2345,false,4,3,checks available
+      EspeakTTS.speak,method,"(text:str) -> None",2347-2375,false,29,7,speak
+      PiperTTS.find_piper_bin,method,"() -> Optional[str]",2382-2392,false,11,6,retrieves piper bin
+      PiperTTS._piper_asset_name,method,"(info:SystemInfo) -> Optional[str]",2395-2405,false,11,6,piper asset name
+      PiperTTS.install_local,method,"(info:SystemInfo, release_tag:str) -> bool",2408-2451,false,44,9,install local
+      PiperTTS._parse_voice_id,method,"(voice_id:str) -> Optional[Tuple[str, str, str, str]]",2454-2465,false,12,7,parses voice id
+      PiperTTS.download_voice,method,"(voice_id:str, voice_version:str) -> bool",2468-2496,false,29,7,download voice
+      PiperTTS.is_available,method,"(info:SystemInfo) -> None",2499-2502,false,4,2,checks available
+      PiperTTS._resolve_model,method,"() -> Optional[str]",2504-2534,false,31,9,resolve model
+      PiperTTS._play_wav,method,"(wav_path:str) -> None",2536-2551,false,16,8,play wav
+      PiperTTS.speak,method,"(text:str) -> None",2553-2596,false,44,13,speak
+      SpdSayTTS.is_available,method,"(info:SystemInfo) -> None",2603-2606,false,4,2,checks available
+      SpdSayTTS.speak,method,"(text:str) -> None",2608-2615,false,8,3,speak
+      SayTTS.is_available,method,"(info:SystemInfo) -> None",2622-2625,false,4,3,checks available
+      SayTTS.speak,method,"(text:str) -> None",2627-2638,false,12,4,speak
+      FliteTTS.is_available,method,"(info:SystemInfo) -> None",2645-2648,false,4,2,checks available
+      FliteTTS.speak,method,"(text:str) -> None",2650-2661,false,12,4,speak
+      CoquiSTT.is_available,method,"(info:SystemInfo) -> None",2671-2676,false,6,2,checks available
+      CoquiSTT.get_recommended_model,method,"(info:SystemInfo) -> Optional[str]",2679-2680,false,2,1,retrieves recommended model
+      CoquiSTT.transcribe,method,"(audio_path:str) -> str",2682-2706,false,25,6,transcribe
+      PicovoiceSTT.is_available,method,"(info:SystemInfo) -> None",2716-2721,false,6,2,checks available
+      PicovoiceSTT.get_recommended_model,method,"(info:SystemInfo) -> Optional[str]",2724-2725,false,2,1,retrieves recommended model
+      PicovoiceSTT.transcribe,method,"(audio_path:str) -> str",2727-2746,false,20,5,transcribe
+      CoquiTTS.is_available,method,"(info:SystemInfo) -> None",2754-2759,false,6,2,checks available
+      CoquiTTS.speak,method,"(text:str) -> None",2761-2787,false,27,7,speak
+      FestivalTTS.is_available,method,"(info:SystemInfo) -> None",2795-2800,false,6,4,checks available
+      FestivalTTS.speak,method,"(text:str) -> None",2802-2837,false,36,6,speak
+      RHVoiceTTS.is_available,method,"(info:SystemInfo) -> None",2845-2848,false,4,3,checks available
+      RHVoiceTTS.speak,method,"(text:str) -> None",2850-2880,false,31,8,speak
+      KokoroTTS.is_available,method,"(info:SystemInfo) -> None",2888-2893,false,6,2,checks available
+      KokoroTTS.speak,method,"(text:str) -> None",2895-2922,false,28,5,speak
+      _NLP2CMDWorker.__init__,method,"(python_exe:str) -> None",3461-3511,false,51,1,creates
+      _NLP2CMDWorker._drain_stderr,method,() -> None,3513-3520,false,8,4,drain stderr
+      _NLP2CMDWorker.translate,method,"(text:str, timeout_s:float=20.0) -> Optional[str]",3522-3554,false,33,13,converts
+      VoiceShell.__init__,method,"(config:dict) -> None",3830-3842,false,13,2,creates
+      VoiceShell._init_stt,method,"() -> Optional[STTProvider]",3844-3897,false,54,16,creates stt
+      VoiceShell._init_tts,method,"() -> Optional[TTSProvider]",3899-3919,false,21,7,creates tts
+      VoiceShell.speak,method,"(text:str) -> None",3921-3923,false,3,3,speak
+      VoiceShell.transcribe,method,"(audio_path:str) -> str",3925-3965,false,41,14,transcribe
+      VoiceShell.listen,method,"(stt_file:Optional[str]=None) -> str",3967-4010,false,44,19,handles
+      VoiceShell.run_command,method,"(cmd:str) -> None",4012-4019,false,8,3,starts command
+      VoiceShell.run_command_streaming,method,"(cmd:str) -> None",4021-4049,false,29,6,Strumieniowe wykonanie komendy z wypisywaniem linia po linii.
+      VoiceShell.run_command_any,method,"(cmd:str) -> None",4051-4073,false,23,6,starts command any
+      VoiceShell.run_command_interactive,method,"(cmd:str) -> None",4075-4134,false,60,20,starts command interactive
+      VoiceShell.run,method,() -> None,4136-4238,false,103,42,starts
+      VoiceShell.run_daemon,method,"(nlp2cmd_url:str='http://localhost:8000', execute:bool=True, nlp2cmd_timeout:float=30.0, log_file:Optional[str]=None, triggers:Optional[List[Tuple[str,str,bool]]]=None, wake_word:Optional[str]=None) -> int",4240-4500,false,261,78,"Run in daemon mode: continuous wake-word listening + nlp2cmd service."

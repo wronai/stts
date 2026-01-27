@@ -1,4 +1,4 @@
-.PHONY: setup voice test-tts gen-samples fix-samples docker-build docker-test help \
+.PHONY: setup voice test test-tts gen-samples fix-samples docker-build docker-test help \
 	stt-vosk-pl stt-vosk-pl-full stt-silero stt-whisper-stream \
 	tts-piper-pl tts-mimic3 tts-festival \
 	setup-local-full test-local
@@ -19,6 +19,10 @@ setup:
 
 voice:
 	@./stts
+
+test:
+	@echo "🧪 Running Python tests (unittest)..."
+	@python3 -m unittest discover -s tests -p "test_*.py" -v
 
 test-tts:
 	@command -v espeak >/dev/null && espeak -v pl "Test syntezatora mowy" || echo "❌ espeak not found"

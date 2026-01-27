@@ -9,6 +9,9 @@ echo "== Generating samples =="
 
 export STTS_MOCK_STT=1
 
+echo "== Python unittest (functional + e2e) =="
+python3 -m unittest discover -s "$ROOT/tests" -p "test_*.py" -v
+
 echo "== STT only (mock) =="
 python3 "$ROOT/stts" --stt-file "$ROOT/samples/cmd_echo_hello.wav" --stt-only | grep -q "echo hello"
 

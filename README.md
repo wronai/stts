@@ -51,6 +51,8 @@ użycie STT i TTS w komendzie shell:
 ./stts git commit -m "{STT}" | ./stts --tts-provider piper --tts-voice en_US-amy-medium --tts-stdin
 # z konfiguracją TTS polski lepszej jakosci
 ./stts git commit -m "{STT}" | ./stts --tts-provider piper --tts-voice pl_PL-gosia-medium --tts-stdin
+
+./stts --timeout 8 --vad-silence-ms 1200 --stt-provider vosk --stt-model pl
 ```
 
 ```bash
@@ -510,7 +512,7 @@ Alternatywa (zawsze odporna na quoting): STT → stdout → `nlp2cmd stdin`:
 
 ### Daemon Mode: Wake-word + nlp2cmd Service (Python)
 
-Tryb ciągłego nasłuchiwania z wake-word "hejken" i integracją z nlp2cmd HTTP service:
+Tryb ciągłego nasłuchiwania z wake-word "hej" i integracją z nlp2cmd HTTP service:
 
 ```bash
 # Terminal 1: uruchom nlp2cmd service
@@ -520,7 +522,7 @@ nlp2cmd service --auto-execute --host 0.0.0.0 --port 8008
 # Terminal 2: uruchom stts daemon
 ./stts --daemon --nlp2cmd-url http://localhost:8008
 ./stts --daemon --nlp2cmd-url http://localhost:8008 --stt-provider vosk --stt-model pl
-./stts --daemon --nlp2cmd-url http://localhost:8008 --wake-word "hejken" --stt-provider vosk --stt-model pl
+./stts --daemon --nlp2cmd-url http://localhost:8008 --wake-word "hej" --stt-provider vosk --stt-model pl
 ./stts --daemon --nlp2cmd-url http://localhost:8008 --wake-word "hej" --stt-provider whisper_cpp --stt-model tiny
 ./stts --daemon --nlp2cmd-url http://localhost:8008 --wake-word "hej" --stt-provider whisper_cpp --stt-model base
 ./stts --daemon --nlp2cmd-url http://localhost:8008 --wake-word "hej" --timeout 8 --vad-silence-ms 1200 --stt-provider vosk --stt-model pl
@@ -552,6 +554,7 @@ Mów do mikrofonu:
 |-------|----------|------|----------|
 | `--daemon` / `--service` | - | Tryb ciągłego nasłuchiwania (wake-word) | `./stts --daemon` |
 | `--nlp2cmd-url` | URL | URL serwisu nlp2cmd | `--nlp2cmd-url http://localhost:8008` |
+| `--nlp2cmd-timeout` | SECONDS | Timeout na HTTP `/query` do nlp2cmd (gdy "wisi") | `--nlp2cmd-timeout 8` |
 | `--daemon-log` | FILE | Zapisz logi do pliku | `--daemon-log /tmp/stts.log` |
 | `--no-execute` | - | Tylko tłumacz (nie wykonuj komend) | `--no-execute` |
 | `--trigger` | SPEC | Trigger: `fraza=CMD` lub `/regex/=CMD` (omija nlp2cmd) | `--trigger "pokaż procesy=ps aux"` |
@@ -602,6 +605,9 @@ Jeśli zależy Ci na *maksymalnie ścisłym* wake-word bez wariantów, ustaw dł
 
 # Daemon mode: dłuższe wypowiedzi (domyślnie nagrywa max 5s)
 ./stts --daemon --nlp2cmd-url http://localhost:8008 --timeout 12 --vad-silence-ms 1200
+
+# Daemon mode: jeśli nlp2cmd czasem długo wykonuje komendy (wygląda jak "zawieszenie"), ustaw krótszy timeout na /query
+./stts --daemon --nlp2cmd-url http://localhost:8008 --nlp2cmd-timeout 8
 
 # Alternatywnie: przez zmienną środowiskową
 export STTS_WAKE_WORD="hejken"

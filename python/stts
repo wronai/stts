@@ -114,6 +114,8 @@ DEFAULT_CONFIG = {
     "vad_silence_ms": 800,
     "vad_threshold_db": -42,
     "safe_mode": False,
+    "vosk_auto_install": True,
+    "vosk_auto_download": True,
     "piper_auto_install": True,
     "piper_auto_download": True,
     "piper_release_tag": "2023.11.14-2",
@@ -178,6 +180,10 @@ def apply_env_overrides(config: dict) -> dict:
             pass
     if os.environ.get("STTS_SAFE_MODE"):
         config["safe_mode"] = os.environ["STTS_SAFE_MODE"].strip() not in ("0", "false", "no", "n")
+    if os.environ.get("STTS_VOSK_AUTO_INSTALL"):
+        config["vosk_auto_install"] = os.environ["STTS_VOSK_AUTO_INSTALL"].strip() not in ("0", "false", "no", "n")
+    if os.environ.get("STTS_VOSK_AUTO_DOWNLOAD"):
+        config["vosk_auto_download"] = os.environ["STTS_VOSK_AUTO_DOWNLOAD"].strip() not in ("0", "false", "no", "n")
     if os.environ.get("STTS_PIPER_AUTO_INSTALL"):
         config["piper_auto_install"] = os.environ["STTS_PIPER_AUTO_INSTALL"].strip() not in ("0", "false", "no", "n")
     if os.environ.get("STTS_PIPER_AUTO_DOWNLOAD"):
@@ -2035,6 +2041,9 @@ class VoskSTT(STTProvider):
     min_ram_gb = 0.5
     models = [
         ("small-pl", "vosk-model-small-pl-0.22", 0.05),
+        ("pl", "vosk-model-small-pl-0.22", 0.05),
+        ("pl-full", "vosk-model-pl-0.22", 0.2),
+        ("pl-0.22", "vosk-model-pl-0.22", 0.2),
         ("small-en", "vosk-model-small-en-us-0.15", 0.04),
     ]
 
@@ -2054,6 +2063,93 @@ class VoskSTT(STTProvider):
         return False, "vosk installed, no models (make stt-vosk-pl)"
 
     @classmethod
+    def install(cls, info: SystemInfo) -> bool:
+        try:
+            res = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-U", "vosk"],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            if res.returncode == 0:
+                return True
+        except Exception:
+            pass
+
+        try:
+            res = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-U", "--user", "vosk"],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            if res.returncode == 0:
+                return True
+        except Exception:
+            pass
+        return False
+
+    @classmethod
+    def download_model(cls, model_name: str) -> Optional[Path]:
+        name = (model_name or "").strip() or "small-pl"
+        if name in ("pl", "pl_PL"):
+            name = "small-pl"
+        if name in ("pl-full", "pl_full"):
+            name = "pl-0.22"
+
+        url = None
+        out_dir = MODELS_DIR / "vosk"
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        if name in ("small-pl", "pl-small"):
+            url = "https://alphacephei.com/vosk/models/vosk-model-small-pl-0.22.zip"
+        elif name in ("pl-0.22", "pl"):
+            url = "https://alphacephei.com/vosk/models/vosk-model-pl-0.22.zip"
+        elif name in ("small-en", "en"):
+            url = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
+        else:
+            mappings = {
+                "vosk-model-small-pl-0.22": "https://alphacephei.com/vosk/models/vosk-model-small-pl-0.22.zip",
+                "vosk-model-pl-0.22": "https://alphacephei.com/vosk/models/vosk-model-pl-0.22.zip",
+                "vosk-model-small-en-us-0.15": "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip",
+            }
+            url = mappings.get(name)
+
+        if not url:
+            return None
+
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(prefix="stts_vosk_", suffix=".zip", delete=False) as f:
+                tmp_path = f.name
+            urllib.request.urlretrieve(url, tmp_path, _download_progress)
+            print()
+
+            with zipfile.ZipFile(tmp_path, "r") as z:
+                for member in z.infolist():
+                    p = member.filename
+                    if p.startswith("/") or ".." in p.split("/"):
+                        continue
+                    z.extract(member, path=str(out_dir))
+
+            # Return the first extracted model dir
+            extracted = list(out_dir.glob("vosk-model-*/"))
+            if extracted:
+                return extracted[0]
+            extracted2 = list(out_dir.glob("vosk-model-*"))
+            if extracted2:
+                return extracted2[0]
+        except Exception:
+            return None
+        finally:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+        return None
+
+    @classmethod
     def get_recommended_model(cls, info: SystemInfo) -> Optional[str]:
         return "small-pl"
 
@@ -2071,6 +2167,9 @@ class VoskSTT(STTProvider):
         model_name = self.model or "small-pl"
         mappings = {
             "small-pl": "vosk-model-small-pl-0.22",
+            "pl": "vosk-model-small-pl-0.22",
+            "pl-small": "vosk-model-small-pl-0.22",
+            "pl-full": "vosk-model-pl-0.22",
             "pl-0.22": "vosk-model-pl-0.22",
             "small-en": "vosk-model-small-en-us-0.15",
         }
@@ -2110,10 +2209,56 @@ class VoskSTT(STTProvider):
             import wave
             model = vosk.Model(str(model_path))
 
-            wf = wave.open(audio_path, "rb")
-            if wf.getnchannels() != 1 or wf.getsampwidth() != 2:
-                cprint(Colors.YELLOW, "⚠️ Audio must be mono 16-bit WAV")
-                return ""
+            def _decode_with_grammar(grammar: str) -> Tuple[str, str]:
+                wf = wave.open(audio_path, "rb")
+                if wf.getnchannels() != 1 or wf.getsampwidth() != 2:
+                    wf.close()
+                    cprint(Colors.YELLOW, "⚠️ Audio must be mono 16-bit WAV")
+                    return "", ""
+
+                def _run_recognizer(r) -> Tuple[str, str]:
+                    while True:
+                        data = wf.readframes(4000)
+                        if len(data) == 0:
+                            break
+                        r.AcceptWaveform(data)
+                    fj = r.FinalResult()
+                    try:
+                        jj = json.loads(fj)
+                        tt = (jj.get("text") or "").strip()
+                    except Exception:
+                        tt = ""
+                    return fj, tt
+
+                if grammar:
+                    try:
+                        rec = vosk.KaldiRecognizer(model, wf.getframerate(), grammar)
+                    except TypeError:
+                        rec = vosk.KaldiRecognizer(model, wf.getframerate())
+                        try:
+                            rec.SetGrammar(grammar)
+                        except Exception:
+                            pass
+                else:
+                    rec = vosk.KaldiRecognizer(model, wf.getframerate())
+                rec.SetWords(False)
+
+                final_json, transcript = _run_recognizer(rec)
+                if (not transcript) and grammar:
+                    try:
+                        wf.rewind()
+                        rec2 = vosk.KaldiRecognizer(model, wf.getframerate())
+                        rec2.SetWords(False)
+                        final_json2, transcript2 = _run_recognizer(rec2)
+                        if transcript2:
+                            cprint(Colors.YELLOW, "⚠️ Vosk: grammar returned empty, retry without grammar")
+                            final_json = final_json2
+                            transcript = transcript2
+                    except Exception:
+                        pass
+
+                wf.close()
+                return transcript, final_json
 
             grammar_src = (
                 (self.config.get("stt_vosk_grammar") if isinstance(self.config, dict) else None)
@@ -2148,28 +2293,20 @@ class VoskSTT(STTProvider):
                 except Exception:
                     grammar_json = ""
 
-            if grammar_json:
+            transcript, final_json = _decode_with_grammar(grammar_json)
+            if (not transcript) and grammar_json:
+                transcript, final_json = _decode_with_grammar("")
+
+            debug = (os.environ.get("STTS_DEBUG_STT") == "1") or (os.environ.get("STTS_DEBUG_VOSK") == "1")
+            if debug and (not transcript):
                 try:
-                    rec = vosk.KaldiRecognizer(model, wf.getframerate(), grammar_json)
-                except TypeError:
-                    rec = vosk.KaldiRecognizer(model, wf.getframerate())
-                    try:
-                        rec.SetGrammar(grammar_json)
-                    except Exception:
-                        pass
-            else:
-                rec = vosk.KaldiRecognizer(model, wf.getframerate())
-            rec.SetWords(False)
-
-            while True:
-                data = wf.readframes(4000)
-                if len(data) == 0:
-                    break
-                rec.AcceptWaveform(data)
-
-            result = json.loads(rec.FinalResult())
-            transcript = result.get("text", "").strip()
-            wf.close()
+                    cprint(
+                        Colors.MAGENTA,
+                        f"[stts] vosk empty result: model={model_path}",
+                    )
+                    cprint(Colors.MAGENTA, f"[stts] vosk FinalResult: {final_json}")
+                except Exception:
+                    pass
 
             return TextNormalizer.normalize(transcript, self.language)
 
@@ -3084,6 +3221,16 @@ DANGEROUS_PATTERNS = [
     r"^\s*wget.*\|\s*(ba)?sh",  # wget | sh
 ]
 
+# Interactive commands that can block a voice-driven daemon.
+INTERACTIVE_PATTERNS = [
+    r"^\s*(?:ba)?sh\s*$",  # bash/sh
+    r"^\s*zsh\s*$",
+    r"^\s*fish\s*$",
+    r"^\s*ssh(\s|$)",
+    r"^\s*top\s*$",
+    r"^\s*htop\s*$",
+]
+
 # SQL patterns (not valid shell commands)
 SQL_PATTERNS = [
     r"^\s*SELECT\s+",
@@ -3116,6 +3263,23 @@ def is_sql_command(cmd: str) -> bool:
 def check_command_safety(cmd: str, config: dict, dry_run: bool) -> Tuple[bool, str]:
     if dry_run:
         return False, "dry-run"
+
+    # In daemon mode, block commands that are very likely to hang waiting for user input.
+    if config.get("_daemon", False):
+        for pattern in INTERACTIVE_PATTERNS:
+            if re.search(pattern, cmd, re.IGNORECASE):
+                if config.get("safe_mode", False):
+                    if not sys.stdin.isatty():
+                        cprint(Colors.YELLOW, "🔒 SAFE MODE (stdin nie jest TTY)")
+                        return False, "safe-mode"
+                    cprint(Colors.YELLOW, "⚠️  Interactive command in daemon mode")
+                    ans = input(f"Uruchomić interaktywnie? ({cmd}) (y/n): ").strip().lower()
+                    if ans == "y":
+                        break
+                    return False, "interactive"
+                cprint(Colors.RED, "🚫 ZABLOKOWANO: interactive command in daemon mode")
+                return False, "interactive"
+
     is_dangerous, reason = is_dangerous_command(cmd)
     if is_dangerous:
         cprint(Colors.RED, f"🚫 ZABLOKOWANO: {reason}")
@@ -3666,6 +3830,8 @@ class VoiceShell:
     def __init__(self, config: dict):
         self.config = config
         self.info = detect_system(fast=bool(self.config.get("fast_start", True)))
+        self._stt_unavailable_reason = None
+        self._warned_stt_disabled = False
         self.stt = self._init_stt()
         self.tts = self._init_tts()
         self._suppress_wake_word_logging = False
@@ -3679,14 +3845,55 @@ class VoiceShell:
         provider = self.config.get("stt_provider")
         if provider in STT_PROVIDERS:
             cls = STT_PROVIDERS[provider]
-            available, _ = cls.is_available(self.info)
+            available, reason = cls.is_available(self.info)
             if available:
+                self._stt_unavailable_reason = None
                 return cls(
                     model=self.config.get("stt_model"),
                     language=self.config.get("language", "pl"),
                     config=self.config,
                     info=self.info,
                 )
+
+            if provider == "vosk":
+                do_install = bool(self.config.get("vosk_auto_install", True))
+                do_download = bool(self.config.get("vosk_auto_download", True))
+
+                reason_s = str(reason or "")
+                if do_install and ("pip install vosk" in reason_s):
+                    cprint(Colors.YELLOW, "📦 Installing vosk (pip)...")
+                    try:
+                        cls.install(self.info)
+                    except Exception:
+                        pass
+
+                available2, reason2 = cls.is_available(self.info)
+                reason2_s = str(reason2 or "")
+
+                if do_download and ("no models" in reason2_s):
+                    model = (self.config.get("stt_model") or "").strip() or (cls.get_recommended_model(self.info) or "small-pl")
+                    cprint(Colors.YELLOW, f"📥 Downloading Vosk model: {model}")
+                    try:
+                        cls.download_model(model)
+                    except Exception:
+                        pass
+                    available2, reason2 = cls.is_available(self.info)
+
+                if available2:
+                    self._stt_unavailable_reason = None
+                    return cls(
+                        model=self.config.get("stt_model"),
+                        language=self.config.get("language", "pl"),
+                        config=self.config,
+                        info=self.info,
+                    )
+                reason = reason2
+
+            self._stt_unavailable_reason = str(reason)
+            print(
+                f"[stts] ⚠️  STT provider '{provider}' unavailable ({reason}); STT disabled",
+                file=sys.stderr,
+            )
         return None
 
     def _init_tts(self) -> Optional[TTSProvider]:
@@ -3724,6 +3931,19 @@ class VoiceShell:
                 except Exception:
                     return ""
         if not self.stt:
+            if (not self._warned_stt_disabled) and self.config.get("stt_provider"):
+                self._warned_stt_disabled = True
+                reason = self._stt_unavailable_reason
+                if reason:
+                    cprint(
+                        Colors.RED,
+                        f"❌ STT disabled: {self.config.get('stt_provider')} ({reason})",
+                    )
+                else:
+                    cprint(
+                        Colors.RED,
+                        f"❌ STT disabled: {self.config.get('stt_provider')}",
+                    )
             return ""
         t0 = time.perf_counter()
         cprint(Colors.YELLOW, f"[{_ts()}] 🔄 Rozpoznawanie...", end=" ")
@@ -3924,6 +4144,15 @@ class VoiceShell:
                     print(f"  mic: {src}")
                 if sink:
                     print(f"  speaker: {sink}")
+
+        stt_state = "disabled"
+        if self.stt:
+            stt_state = f"{getattr(self.stt, 'name', 'stt')} model={getattr(self.stt, 'model', '')}"
+        else:
+            reason = f" reason={self._stt_unavailable_reason}" if self._stt_unavailable_reason else ""
+            stt_state = f"disabled (stt_provider={self.config.get('stt_provider')} stt_model={self.config.get('stt_model')}{reason})"
+        print(f"STT: {stt_state}")
+
         tts_state = "disabled"
         if self.tts:
             tts_state = f"{getattr(self.tts, 'name', 'tts')} voice={getattr(self.tts, 'voice', '')}"
@@ -4012,6 +4241,7 @@ class VoiceShell:
         self,
         nlp2cmd_url: str = "http://localhost:8000",
         execute: bool = True,
+        nlp2cmd_timeout: float = 30.0,
         log_file: Optional[str] = None,
         triggers: Optional[List[Tuple[str, str, bool]]] = None,
         wake_word: Optional[str] = None,
@@ -4031,8 +4261,13 @@ class VoiceShell:
                     pass
 
         ww = (wake_word or "hejken").strip() or "hejken"
+        try:
+            self.config["_daemon"] = True
+        except Exception:
+            pass
         cprint(Colors.BOLD + Colors.CYAN, f"\n🎙️  STTS Daemon Mode (wake-word: {ww})\n")
         log(f"nlp2cmd service: {nlp2cmd_url}")
+        log(f"nlp2cmd timeout: {nlp2cmd_timeout}s")
         log(f"execute commands: {execute}")
         log(f"Say '{ww} <command>' to execute. Ctrl+C to stop.")
 
@@ -4167,13 +4402,12 @@ class VoiceShell:
                     query=query_text,
                     url=nlp2cmd_url,
                     execute=execute,
-                    timeout=30.0,
+                    timeout=float(nlp2cmd_timeout or 30.0),
                 )
-
                 if not result:
-                    log("❌ nlp2cmd service failed")
+                    log("❌ nlp2cmd query failed")
                     if self.tts:
-                        self.speak("Nie udało się połączyć z serwisem")
+                        self.speak("Nie udało się przetworzyć")
                     continue
 
                 if not result.get("success"):
@@ -4238,6 +4472,14 @@ class VoiceShell:
                 else:
                     # Execute locally if not executed by service
                     log(f"▶️  Executing locally (nlp2cmd returned only translation): {cmd}")
+
+                    ok, reason = check_command_safety(cmd, self.config, dry_run=False)
+                    if not ok:
+                        log(f"🚫 Blocked (local execute): {reason}")
+                        if self.tts:
+                            self.speak("Zablokowano komendę")
+                        continue
+
                     out, code, _ = self.run_command_any(cmd)
                     if out.strip():
                         print(out, flush=True)
@@ -4288,6 +4530,7 @@ def parse_args(argv: List[str]):
     nlp2cmd_parallel = None
     daemon_mode = False
     nlp2cmd_url = None
+    nlp2cmd_timeout_s = None
     daemon_log = None
     daemon_no_execute = False
     daemon_triggers: List[str] = []
@@ -4367,6 +4610,11 @@ def parse_args(argv: List[str]):
             daemon_mode = True
         elif a == "--nlp2cmd-url":
             nlp2cmd_url = next(it, None)
+        elif a == "--nlp2cmd-timeout":
+            try:
+                nlp2cmd_timeout_s = float((next(it, None) or "").strip())
+            except Exception:
+                nlp2cmd_timeout_s = None
         elif a == "--daemon-log":
             daemon_log = next(it, None)
         elif a == "--no-execute":
@@ -4383,7 +4631,7 @@ def parse_args(argv: List[str]):
             help_ = True
         else:
             rest.append(a)
-    return stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, stt_provider, stt_model, timeout_s, vad_silence_ms, list_stt, list_tts, nlp2cmd_parallel, daemon_mode, nlp2cmd_url, daemon_log, daemon_no_execute, daemon_triggers, daemon_triggers_file, daemon_wake_word, rest
+    return stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, stt_provider, stt_model, timeout_s, vad_silence_ms, list_stt, list_tts, nlp2cmd_parallel, daemon_mode, nlp2cmd_url, nlp2cmd_timeout_s, daemon_log, daemon_no_execute, daemon_triggers, daemon_triggers_file, daemon_wake_word, rest
 
 
 def tts_test(shell: "VoiceShell", text: str) -> int:
@@ -4509,7 +4757,7 @@ def expand_placeholders(args: List[str], shell: 'VoiceShell', config: dict, stt_
 
 def main():
     config = load_config()
-    stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test_flag, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, stt_provider_arg, stt_model_arg, timeout_s, vad_silence_ms, list_stt, list_tts, nlp2cmd_parallel, daemon_mode, nlp2cmd_url, daemon_log, daemon_no_execute, daemon_triggers, daemon_triggers_file, daemon_wake_word, rest = parse_args(sys.argv[1:])
+    stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test_flag, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, stt_provider_arg, stt_model_arg, timeout_s, vad_silence_ms, list_stt, list_tts, nlp2cmd_parallel, daemon_mode, nlp2cmd_url, nlp2cmd_timeout_s, daemon_log, daemon_no_execute, daemon_triggers, daemon_triggers_file, daemon_wake_word, rest = parse_args(sys.argv[1:])
 
     # Apply CLI overrides for STT provider/model
     if stt_provider_arg:
@@ -4587,6 +4835,7 @@ def main():
         print("\nTryb daemon (wake-word + nlp2cmd service):")
         print("  --daemon / --service   Uruchom w trybie ciągłego nasłuchiwania (wake-word: hejken)")
         print("  --nlp2cmd-url URL      URL serwisu nlp2cmd (domyślnie: http://localhost:8000)")
+        print("  --nlp2cmd-timeout SEC  Timeout na HTTP /query do nlp2cmd (domyślnie: 30s)")
         print("  --daemon-log FILE      Zapisz logi do pliku")
         print("  --no-execute           Tylko tłumacz (nie wykonuj komend)")
         print("  --trigger SPEC         Trigger: fraza=CMD lub /regex/=CMD (omija nlp2cmd)")
@@ -4660,9 +4909,11 @@ def main():
             pat = _wake_word_phrase_to_pattern(wake_word)
             if pat:
                 config["daemon_wake_patterns"] = [pat]
+        nlp2cmd_timeout = float(nlp2cmd_timeout_s or 30.0)
         code = shell.run_daemon(
             nlp2cmd_url=url,
             execute=execute,
+            nlp2cmd_timeout=nlp2cmd_timeout,
             log_file=daemon_log,
             triggers=rules,
             wake_word=wake_word,
