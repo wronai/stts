@@ -8,7 +8,7 @@ import importlib.machinery
 
 def _load_stts_module(config_dir: str):
     os.environ["STTS_CONFIG_DIR"] = config_dir
-    os.environ.setdefault("STTS_NLP2CMD_ENABLED", "0")
+    os.environ["STTS_NLP2CMD_ENABLED"] = "0"
     os.environ.setdefault("STTS_AUTO_TTS", "0")
     stts_path = Path(__file__).resolve().parents[1] / "stts"
     loader = importlib.machinery.SourceFileLoader("stts_script", str(stts_path))

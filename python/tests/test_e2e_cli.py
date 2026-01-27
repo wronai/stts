@@ -19,7 +19,7 @@ class TestE2ECLI(unittest.TestCase):
         env = os.environ.copy()
         env["STTS_MOCK_STT"] = "1"
         env["STTS_AUTO_TTS"] = "0"
-        env["STTS_NLP2CMD_ENABLED"] = env.get("STTS_NLP2CMD_ENABLED", "0")
+        env["STTS_NLP2CMD_ENABLED"] = "0"
 
         with tempfile.TemporaryDirectory(prefix="stts_e2e_cfg_") as cfg:
             env["STTS_CONFIG_DIR"] = cfg

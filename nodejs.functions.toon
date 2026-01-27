@@ -1,5 +1,46 @@
 project: nodejs
-generated: "2026-01-27T10:44:49.783352"
-modules[0]{path,lang,items}:
+generated: "2026-01-27T11:09:09.492697"
+modules[1]{path,lang,items}:
+  stts.mjs,javascript,38
 
 function_details:
+  stts.mjs:
+    functions[38]{name,kind,sig,loc,async,lines,cc,does}:
+      loadDotenv,function,(),27-58,false,32,1,retrieves dotenv
+      applyEnvOverrides,function,(config),85-127,false,43,1,apply env overrides
+      cprint,function,"(color, text)",140-142,false,3,1,cprint
+      levenshteinBounded,function,"(a, b, maxDist)",264-292,false,29,1,levenshtein bounded
+      fuzzyPhoneticReplacement,function,(clean),294-323,false,30,1,fuzzy phonetic replacement
+      fixPhoneticEnglish,function,(text),325-345,false,21,1,fix phonetic english
+      normalizeSTTText,function,(text),347-366,false,20,1,normalize stt text
+      detectCuda,function,(),368-375,false,8,1,detect cuda
+      hasGpuBuild,function,(),377-380,false,4,1,checks gpu build
+      nlp2cmdParallelEnabled,function,(config),382-386,false,5,1,nlp2cmd parallel enabled
+      resolveNlp2cmdPython,function,(),388-391,false,4,1,resolve nlp2cmd python
+      nlp2cmdPrewarm,function,(config),482-490,false,9,1,nlp2cmd prewarm
+      nlp2cmdTranslate,function,(text),492-522,true,31,1,nlp2cmd translate
+      nlp2cmdConfirm,function,(cmd),524-531,false,8,1,nlp2cmd confirm
+      which,function,(cmd),533-540,false,8,1,which
+      detectPromptFlag,function,(whisperBin),544-560,false,17,1,detect prompt flag
+      ensureDir,function,(dir),562-566,false,5,1,ensure dir
+      normalizeConfigFormat,function,(v),568-574,false,7,1,normalize config format
+      getConfigFileForLoad,function,(),576-590,false,15,1,retrieves config file for load
+      getConfigFileForSave,function,(),592-604,false,13,1,retrieves config file for save
+      parseSimpleYaml,function,(text),606-641,false,36,1,parses simple yaml
+      dumpSimpleYaml,function,(data),643-657,false,15,1,dump simple yaml
+      detectSystem,function,(),662-721,false,60,1,detect system
+      printSystemInfo,function,(info),723-736,false,14,1,logs system info
+      downloadFile,function,"(url, destPath)",738-775,false,38,1,download file
+      loadConfig,function,(),777-792,false,16,1,retrieves config
+      saveConfig,function,(config),794-802,false,9,1,caches config
+      recordAudio,function,(),1102-1119,false,18,1,record audio
+      question,function,"(rl, prompt)",1121-1123,true,3,1,question
+      interactiveSetup,function,(),1125-1193,true,69,1,interactive setup
+      speak,function,"(text, config)",1195-1202,true,8,1,speak
+      listen,function,(config),1204-1235,true,32,1,handles
+      runCommand,function,(cmd),1237-1265,true,29,1,starts command
+      voiceShell,function,(config),1267-1341,true,75,1,voice shell
+      parseArgs,function,(argv),1343-1398,false,56,1,parses args
+      main,function,(),1400-1513,true,114,1,main
+      Nlp2cmdWorker.constructor,method,(pythonExe),394-458,false,65,1,constructor
+      Nlp2cmdWorker.translate,method,(text),460-477,false,18,1,converts
