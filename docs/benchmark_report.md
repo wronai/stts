@@ -3,6 +3,12 @@
 ## Run command
 
 ```bash
+make benchmark-report
+```
+
+Or directly:
+
+```bash
 STTS_BENCH_WARMUP=1 STTS_BENCH_ITERS=3 ./examples/benchmark.sh
 ```
 

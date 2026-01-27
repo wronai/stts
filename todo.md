@@ -1,5 +1,34 @@
 # TODO (stts)
 
+## Plan refaktoryzacji (2026-01-27)
+
+### 0) Quality gates i testy (bazując na aktualnych testach/raportach)
+
+- [x] `make test` uruchamia Python unittesty + CLI smoke (mock STT)
+- [x] Node.js CLI smoke tests w `nodejs/tests/docker_test.sh` (bez interakcji, opcjonalne generowanie próbek)
+- [x] Lekkie testy metryk z `examples/bench_metrics.py` (WER/CER/stats)
+- [x] `make test-full` dla `examples/e2e_all.sh` (opcjonalne providery)
+- [ ] Dopisać w `docs/e2e_tests.md` sekcję o `make test-full` + wymaganiach providerów
+- [ ] Rozważyć target `make benchmark-report` z `examples/benchmark.sh` i aktualizacją `docs/benchmark_report.md`
+
+### 1) Warstwa rdzenia i CLI (Python/Node)
+
+- [ ] Wydzielić core pipeline: config → STT → normalize → NLP2CMD → execute → TTS
+- [ ] Ujednolicić API i argumenty CLI (parytet flag) w Python/Node; spisać rozbieżności
+- [ ] Uporządkować konfigurację (env/config/CLI) w obu implementacjach: walidacja, defaulty, log startu
+
+### 2) Provider abstraction + wydajność
+
+- [ ] Standardowy interfejs providerów STT/TTS (metadata: model, language, supports_stream, requires_gpu)
+- [ ] Fallback i auto-select providerów wg configu (spójnie Python/Node)
+- [ ] Prewarm + cache modeli jako osobny moduł (wspólny kontrakt)
+
+### 3) Observability + stabilność
+
+- [ ] Centralny logger (etapy startu, czasy, warningi) + tryb debug
+- [ ] Spójne kategorie błędów (STT/TTS/NLP2CMD/IO) i komunikaty użytkownika
+- [ ] Audyt `safe_mode` + denylist (testy regresji)
+
 ## Priorytet: szybkość + gotowość po starcie
 
 - [ ] Ujednolicić "fast start" jako domyślną ścieżkę w obu implementacjach (Python/Node) i ograniczyć kosztowne wykrywanie sprzętu do trybu `--full-start`.

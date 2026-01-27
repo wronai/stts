@@ -12,6 +12,7 @@ When you set `STTS_MOCK_STT=1`, STTS reads `*.wav.txt` instead of running a real
 Run via make:
 
 ```bash
+make test              # python + nodejs core suites
 make docker-test-python
 make docker-test-nodejs
 ```
@@ -26,6 +27,12 @@ bash nodejs/tests/docker_test.sh
 ## Local E2E suites (examples/)
 
 The repository also contains convenience scripts under `examples/`.
+
+```bash
+make test-full         # runs all local E2E suites
+```
+
+Or directly:
 
 ```bash
 bash examples/e2e_all.sh

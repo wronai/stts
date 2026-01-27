@@ -1,7 +1,7 @@
 # stts - Universal Voice Shell
 # Makefile integration
 
-.PHONY: install test voice setup clean help setup-python setup-nodejs voice-python voice-nodejs gen-samples-python gen-samples-nodejs docker-build-python docker-build-nodejs docker-test-python docker-test-nodejs test-docker \
+.PHONY: install test test-full benchmark-report voice setup clean help setup-python setup-nodejs voice-python voice-nodejs gen-samples-python gen-samples-nodejs docker-build-python docker-build-nodejs docker-test-python docker-test-nodejs test-docker \
 	stt-vosk-pl stt-silero stt-whisper-stream tts-piper-pl tts-mimic3 tts-festival setup-local-full test-local fix-samples benchmark-fix benchmark-real
 
 VERSION := $(shell cat VERSION 2>/dev/null || echo 0.0.0)
@@ -121,9 +121,19 @@ test-docker:
 			exit 1; \
 		fi
 
-# Test Python unittests
+# Test Python + Node.js core suites
 test:
 	@$(MAKE) -C python test
+	@$(MAKE) -C nodejs test
+
+# Full E2E suite (optional providers)
+test-full:
+	@bash ./examples/e2e_all.sh
+
+# Benchmark report (optional)
+benchmark-report:
+	@STTS_BENCH_WARMUP=${STTS_BENCH_WARMUP:-1} STTS_BENCH_ITERS=${STTS_BENCH_ITERS:-3} \
+		./examples/benchmark.sh
 
 # Test TTS
 test-tts:
@@ -173,7 +183,9 @@ help:
 	@echo "  make publish      - Publish to both npmjs and PyPI"
 	@echo "  make voice        - Start voice shell (Python)"
 	@echo "  make voice-node   - Start voice shell (Node.js)"
-	@echo "  make test         - Run Python unittests"
+	@echo "  make test         - Run Python + Node.js core tests"
+	@echo "  make test-full    - Run extended E2E suite (optional providers)"
+	@echo "  make benchmark-report - Run benchmark matrix (optional, longer)"
 	@echo "  make test-tts     - Test TTS"
 	@echo "  make test-stt     - Test microphone"
 	@echo "  make clean        - Remove downloaded models"
