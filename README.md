@@ -178,6 +178,8 @@ Najważniejsze zmienne:
 - `STTS_WHISPER_WORD_THOLD=...` - whisper.cpp: próg słów (opcjonalnie)
 - `STTS_WHISPER_NO_SPEECH_THOLD=...` - whisper.cpp: próg ciszy (opcjonalnie)
 - `STTS_WHISPER_ENTROPY_THOLD=...` - whisper.cpp: próg entropii (opcjonalnie)
+- `STTS_FASTER_WHISPER_DEVICE=auto|cpu|cuda` - faster-whisper: urządzenie (opcjonalnie)
+- `STTS_FASTER_WHISPER_COMPUTE_TYPE=int8|float16|float32` - faster-whisper: typ obliczeń (opcjonalnie)
 
 ## NLP2CMD (Natural Language → komendy)
 
@@ -319,7 +321,7 @@ STTS_DEEPGRAM_KEY=sk-... STTS_STT_PROVIDER=deepgram STTS_DEEPGRAM_MODEL=nova-2 .
 ## ✨ Funkcje
 
 - **Auto-detekcja sprzętu** - sprawdza RAM, GPU, CPU i rekomenduje odpowiedni model
-- **Wybór STT** - whisper.cpp, faster-whisper, vosk, Google Speech
+- **Wybór STT** - whisper.cpp, faster-whisper, vosk, deepgram
 - **Wybór TTS** - espeak, piper (neural), system TTS
 - **Auto-pobieranie** - modele pobierane automatycznie
 - **Cross-platform** - Linux, macOS, Windows, Raspberry Pi
@@ -444,7 +446,7 @@ brew install espeak sox
 | **whisper.cpp** | 1 GB | ❌ | ✅ | ⭐⭐⭐⭐ | ⭐⭐⭐ |
 | **faster-whisper** | 2 GB | ✅ (opt) | ✅ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
 | **vosk** | 0.5 GB | ❌ | ✅ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
-| **google** | 0.5 GB | ❌ | ❌ | ⭐⭐⭐⭐ | ⭐⭐⭐ |
+| **deepgram** | 0.5 GB | ❌ | ❌ | ⭐⭐⭐⭐ | ⭐⭐⭐ |
 
 ### Modele Whisper
 
@@ -772,6 +774,13 @@ STTS_STT_GPU_LAYERS=35 ./stts
 
 ```bash
 pip install faster-whisper
+
+# Użycie (Python)
+STTS_STT_PROVIDER=faster_whisper STTS_STT_MODEL=base ./stts --stt-file python/samples/cmd_ls.wav --stt-only
+
+# Strojenie (CPU, szybkie int8)
+STTS_FASTER_WHISPER_DEVICE=cpu STTS_FASTER_WHISPER_COMPUTE_TYPE=int8 \
+  STTS_STT_PROVIDER=faster_whisper STTS_STT_MODEL=base ./stts --stt-file python/samples/cmd_ls.wav --stt-only
 ```
 
 ### STT: vosk (lekki, RPi)
@@ -944,7 +953,9 @@ stts/
 
 - **Python**: `python/README.md` – szczegóły TTS, piper, VAD, audio, CLI
 - **Node.js**: `nodejs/README.md` – szczegóły ESM, Docker, CLI
-- **Docs**: `docs/README.md` – dodatkowe dokumenty (provider STT, testy E2E)
+- **Docs**: `docs/README.md` – dodatkowe dokumenty (provider STT/TTS, testy E2E)
+- **STT providers**: `docs/stt_providers.md`
+- **TTS providers**: `docs/tts_providers.md`
 - **Examples**: `examples/README.md` – gotowe skrypty E2E do uruchomienia
 - **.env**: `.env.example` (root) + `python/.env.example` + `nodejs/.env.example`
 - **Makefile**: `python/Makefile` – targety `tts-setup-espeak`, `tts-setup-piper`

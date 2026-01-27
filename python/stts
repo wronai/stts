@@ -3927,7 +3927,14 @@ class VoiceShell:
         HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
         if HISTORY_FILE.exists():
             readline.read_history_file(str(HISTORY_FILE))
-        atexit.register(lambda: readline.write_history_file(str(HISTORY_FILE)))
+        def _write_history():
+            try:
+                HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+                readline.write_history_file(str(HISTORY_FILE))
+            except Exception:
+                pass
+
+        atexit.register(_write_history)
 
     def _init_stt(self) -> Optional[STTProvider]:
         provider = self.config.get("stt_provider")
@@ -4843,6 +4850,229 @@ def expand_placeholders(args: List[str], shell: 'VoiceShell', config: dict, stt_
     return expanded
 
 
+def _run_stt_stream_shell(shell, config, stt_file, stream_shell_cmd, dry_run):
+    if not stream_shell_cmd:
+        cprint(Colors.RED, "❌ Brak --cmd w trybie --stt-stream-shell")
+        return 2
+
+    PS1 = f"{Colors.GREEN}🔴 captions>{Colors.NC} "
+    print(
+        "Voice shell (placeholder): mów do mikrofonu, STT wstawiane w {STT}/{STT_STREAM}. CTRL+C = pomiń, CTRL+D = wyjście",
+        file=sys.stderr,
+    )
+
+    one_shot = bool(stt_file)
+    while True:
+        try:
+            if sys.stdin.isatty() and (not one_shot):
+                _ = input(PS1)
+
+            with contextlib.redirect_stdout(sys.stderr):
+                text = shell.listen(stt_file=stt_file) if stt_file else shell.listen()
+
+            if not text:
+                if one_shot:
+                    return 1
+                continue
+
+            t = (text or "").strip()
+            if t.lower() in ("exit", "quit", "q"):
+                return 0
+
+            print(f"📝 {t}", file=sys.stderr)
+
+            cmd = (stream_shell_cmd or "").replace("{STT}", t).replace("{STT_STREAM}", t)
+
+            if dry_run:
+                print(cmd)
+                if one_shot:
+                    return 0
+                continue
+
+            ok, reason = check_command_safety(cmd, config, dry_run)
+            if not ok:
+                if one_shot:
+                    return 0 if reason == "dry-run" else 1
+                continue
+
+            out, code, printed = shell.run_command_any(cmd)
+            if out.strip() and not printed:
+                print(out, end="", flush=True)
+            lines = [l.strip() for l in out.splitlines() if l.strip()]
+            if lines and shell.tts and config.get("auto_tts", True):
+                shell.tts.speak(lines[-1][:200])
+
+            if one_shot:
+                return code
+        except KeyboardInterrupt:
+            print("", file=sys.stderr)
+            if one_shot:
+                return 130
+            continue
+        except EOFError:
+            return 0
+
+
+def _run_stt_once(shell, stt_file):
+    with contextlib.redirect_stdout(sys.stderr):
+        text = shell.listen(stt_file=stt_file) if stt_file else shell.listen()
+    if text:
+        print(text)
+        return 0 if text else 1
+    return 1
+
+
+def _run_nlp2cmd_parallel_fastpath(config, shell, stt_file, stt_only, dry_run, rest):
+    bin_name = os.environ.get("STTS_NLP2CMD_BIN", "nlp2cmd")
+    if not (rest and rest[0] == bin_name and any("{STT}" in a for a in rest)):
+        return None
+
+    run_mode = ("-r" in rest) or ("--run" in rest)
+    auto_confirm = ("--auto-confirm" in rest)
+
+    nlp2cmd_prewarm(config)
+    if stt_file:
+        text = shell.listen(stt_file=stt_file)
+        if stt_only:
+            print(text)
+            return 0 if text else 1
+    else:
+        with contextlib.redirect_stdout(sys.stderr):
+            text = shell.listen()
+    if not text:
+        return 1
+
+    translated = nlp2cmd_translate(text, config=config, force=True)
+    if not translated:
+        cprint(Colors.RED, "❌ nlp2cmd: brak wygenerowanej komendy")
+        return 1
+
+    if dry_run:
+        print(translated)
+        return 0
+
+    if not auto_confirm:
+        if not nlp2cmd_confirm(translated):
+            return 0
+
+    ok, reason = check_command_safety(translated, config, dry_run)
+    if not ok:
+        return 0 if reason == "dry-run" else 1
+    out, code, printed = shell.run_command_any(translated)
+    if out.strip() and not printed:
+        print(out, end="", flush=True)
+    return code
+
+
+def _run_stt_file_placeholder_mode(config, shell, stt_file, dry_run, rest):
+    nlp2cmd_prewarm(config)
+    text = shell.listen(stt_file=stt_file)
+    if not text:
+        return 1
+
+    expanded = [str(a).replace("{STT}", text).replace("{STT_STREAM}", text) for a in rest]
+    cmd = argv_to_cmd(expanded)
+
+    if dry_run:
+        print(cmd)
+        return 0
+
+    ok, reason = check_command_safety(cmd, config, dry_run)
+    if not ok:
+        return 0 if reason == "dry-run" else 1
+
+    out, code, printed = shell.run_command_any(cmd)
+    if out.strip() and not printed:
+        print(out, end="", flush=True)
+    lines = [l.strip() for l in out.splitlines() if l.strip()]
+    if lines and shell.tts and config.get("auto_tts", True):
+        shell.tts.speak(lines[-1][:200])
+    return code
+
+
+def _run_stt_file_default_mode(config, shell, stt_file, stt_only, dry_run):
+    nlp2cmd_prewarm(config)
+    text = shell.listen(stt_file=stt_file)
+    if stt_only:
+        print(text)
+        return 0 if text else 1
+    if text:
+        if dry_run:
+            print(text)
+            return 0
+        translated = nlp2cmd_translate(text, config=config)
+        if translated and nlp2cmd_confirm(translated):
+            text = translated
+        out, code, printed = shell.run_command_any(text)
+        if out.strip() and not printed:
+            print(out, end="", flush=True)
+        return code
+    return 1
+
+
+def _run_pipe_dry_run() -> int:
+    data = ""
+    try:
+        data = sys.stdin.read()
+    except Exception:
+        data = ""
+    lines = [l.strip() for l in (data or "").splitlines() if l.strip()]
+    cmd = lines[-1] if lines else ""
+    if not cmd:
+        return 1
+    try:
+        print(cmd)
+    except BrokenPipeError:
+        return 0
+    return 0
+
+
+def _run_nlp2cmd_stdin_mode(config, shell, rest, dry_run):
+    bin_name = os.environ.get("STTS_NLP2CMD_BIN", "nlp2cmd")
+    if not (rest and rest[0] == bin_name and (not sys.stdin.isatty()) and any(a == "stdin" for a in rest[1:])):
+        return None
+
+    run_mode = ("-r" in rest) or ("--run" in rest)
+    auto_confirm = ("--auto-confirm" in rest)
+
+    data = ""
+    try:
+        data = sys.stdin.read()
+    except Exception:
+        data = ""
+    lines = [l.strip() for l in (data or "").splitlines() if l.strip()]
+    text = lines[-1] if lines else ""
+    if not text:
+        cprint(Colors.RED, "❌ stdin: brak tekstu")
+        return 1
+
+    nlp2cmd_prewarm_force()
+    translated = nlp2cmd_translate(text, config=config, force=True)
+    if not translated:
+        cprint(Colors.RED, "❌ nlp2cmd: brak wygenerowanej komendy")
+        return 1
+
+    if not run_mode:
+        print(translated)
+        return 0
+
+    if dry_run:
+        print(translated)
+        return 0
+
+    if not auto_confirm:
+        if not nlp2cmd_confirm(translated):
+            return 0
+
+    ok, reason = check_command_safety(translated, config, dry_run)
+    if not ok:
+        return 0 if reason == "dry-run" else 1
+    out, code, printed = shell.run_command_any(translated)
+    if out.strip() and not printed:
+        print(out, end="", flush=True)
+    return code
+
+
 def main():
     config = load_config()
     stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test_flag, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, stt_provider_arg, stt_model_arg, timeout_s, vad_silence_ms, list_stt, list_tts, nlp2cmd_parallel, daemon_mode, nlp2cmd_url, nlp2cmd_timeout_s, daemon_log, daemon_no_execute, daemon_triggers, daemon_triggers_file, daemon_wake_word, rest = parse_args(sys.argv[1:])
@@ -4974,9 +5204,28 @@ def main():
         if not (init or setup or stt_once or stt_file or rest or tts_stdin or tts_test_flag):
             return 0
 
+    pipe_dry_run_mode = bool(
+        dry_run
+        and (not rest)
+        and (not stt_once)
+        and (not stt_stream_shell)
+        and (not tts_stdin)
+        and (not tts_test_flag)
+        and (not setup)
+        and (not init)
+        and (not sys.stdin.isatty())
+    )
+
     if init:
         config = quick_init(init)
-    elif setup or (config.get("stt_provider") is None and config.get("tts_provider") is None and not rest and not stt_file and not tts_stdin):
+    elif setup or (
+        (not pipe_dry_run_mode)
+        and config.get("stt_provider") is None
+        and config.get("tts_provider") is None
+        and (not rest)
+        and (not stt_file)
+        and (not tts_stdin)
+    ):
         config = interactive_setup()
 
     shell = VoiceShell(config)
@@ -5009,179 +5258,35 @@ def main():
         return int(code or 0)
 
     if stt_stream_shell:
-        if not stream_shell_cmd:
-            cprint(Colors.RED, "❌ Brak --cmd w trybie --stt-stream-shell")
-            return 2
-
-        PS1 = f"{Colors.GREEN}🔴 captions>{Colors.NC} "
-        print("Voice shell (placeholder): mów do mikrofonu, STT wstawiane w {STT}/{STT_STREAM}. CTRL+C = pomiń, CTRL+D = wyjście", file=sys.stderr)
-
-        one_shot = bool(stt_file)
-        while True:
-            try:
-                if sys.stdin.isatty() and (not one_shot):
-                    _ = input(PS1)
-
-                with contextlib.redirect_stdout(sys.stderr):
-                    text = shell.listen(stt_file=stt_file) if stt_file else shell.listen()
-
-                if not text:
-                    if one_shot:
-                        return 1
-                    continue
-
-                t = (text or "").strip()
-                if t.lower() in ("exit", "quit", "q"):
-                    return 0
-
-                print(f"📝 {t}", file=sys.stderr)
-
-                cmd = (stream_shell_cmd or "").replace("{STT}", t).replace("{STT_STREAM}", t)
-
-                if dry_run:
-                    print(cmd)
-                    if one_shot:
-                        return 0
-                    continue
-
-                ok, reason = check_command_safety(cmd, config, dry_run)
-                if not ok:
-                    if one_shot:
-                        return 0 if reason == "dry-run" else 1
-                    continue
-
-                out, code, printed = shell.run_command_any(cmd)
-                if out.strip() and not printed:
-                    print(out, end="", flush=True)
-                lines = [l.strip() for l in out.splitlines() if l.strip()]
-                if lines and shell.tts and config.get("auto_tts", True):
-                    shell.tts.speak(lines[-1][:200])
-
-                if one_shot:
-                    return code
-            except KeyboardInterrupt:
-                print("", file=sys.stderr)
-                if one_shot:
-                    return 130
-                continue
-            except EOFError:
-                return 0
+        return _run_stt_stream_shell(shell, config, stt_file, stream_shell_cmd, dry_run)
 
     if stt_once:
         # Pipeline-friendly mode: transcript to stdout, all prompts/status to stderr
-        with contextlib.redirect_stdout(sys.stderr):
-            text = shell.listen(stt_file=stt_file) if stt_file else shell.listen()
-        if text:
-            print(text)
-            return 0 if text else 1
-        return 1
+        return _run_stt_once(shell, stt_file)
 
     if config.get("nlp2cmd_parallel"):
-        bin_name = os.environ.get("STTS_NLP2CMD_BIN", "nlp2cmd")
-        if rest and rest[0] == bin_name and any("{STT}" in a for a in rest):
-            run_mode = ("-r" in rest) or ("--run" in rest)
-            auto_confirm = ("--auto-confirm" in rest)
-
-            nlp2cmd_prewarm(config)
-            if stt_file:
-                text = shell.listen(stt_file=stt_file)
-                if stt_only:
-                    print(text)
-                    return 0 if text else 1
-            else:
-                with contextlib.redirect_stdout(sys.stderr):
-                    text = shell.listen()
-            if not text:
-                return 1
-
-            translated = nlp2cmd_translate(text, config=config, force=True)
-            if not translated:
-                cprint(Colors.RED, "❌ nlp2cmd: brak wygenerowanej komendy")
-                return 1
-
-            if dry_run:
-                print(translated)
-                return 0
-
-            if not auto_confirm:
-                if not nlp2cmd_confirm(translated):
-                    return 0
-
-            ok, reason = check_command_safety(translated, config, dry_run)
-            if not ok:
-                return 0 if reason == "dry-run" else 1
-            out, code, printed = shell.run_command_any(translated)
-            if out.strip() and not printed:
-                print(out, end="", flush=True)
+        code = _run_nlp2cmd_parallel_fastpath(config, shell, stt_file, stt_only, dry_run, rest)
+        if code is not None:
             return code
 
     if stt_file:
         # When user provides an explicit command template with {STT}/{STT_STREAM}, treat it as
         # placeholder expansion mode (useful for CI/docker and one-shot runs).
         if rest and any(("{STT}" in a) or ("{STT_STREAM}" in a) for a in rest):
-            nlp2cmd_prewarm(config)
-            text = shell.listen(stt_file=stt_file)
             if stt_only:
+                nlp2cmd_prewarm(config)
+                text = shell.listen(stt_file=stt_file)
                 print(text)
                 return 0 if text else 1
-            if not text:
-                return 1
-
-            expanded = [str(a).replace("{STT}", text).replace("{STT_STREAM}", text) for a in rest]
-            cmd = argv_to_cmd(expanded)
-
-            if dry_run:
-                print(cmd)
-                return 0
-
-            ok, reason = check_command_safety(cmd, config, dry_run)
-            if not ok:
-                return 0 if reason == "dry-run" else 1
-
-            out, code, printed = shell.run_command_any(cmd)
-            if out.strip() and not printed:
-                print(out, end="", flush=True)
-            lines = [l.strip() for l in out.splitlines() if l.strip()]
-            if lines and shell.tts and config.get("auto_tts", True):
-                shell.tts.speak(lines[-1][:200])
-            return code
+            return _run_stt_file_placeholder_mode(config, shell, stt_file, dry_run, rest)
 
         # Default: execute transcript (with optional nlp2cmd translation)
-        nlp2cmd_prewarm(config)
-        text = shell.listen(stt_file=stt_file)
-        if stt_only:
-            print(text)
-            return 0 if text else 1
-        if text:
-            if dry_run:
-                print(text)
-                return 0
-            translated = nlp2cmd_translate(text, config=config)
-            if translated and nlp2cmd_confirm(translated):
-                text = translated
-            out, code, printed = shell.run_command_any(text)
-            if out.strip() and not printed:
-                print(out, end="", flush=True)
-            return code
-        return 1
+        return _run_stt_file_default_mode(config, shell, stt_file, stt_only, dry_run)
 
     # Pipeline-friendly: allow piping a command into stts and asking for dry-run printing.
     # Example: echo "rm -rf /" | ./stts --dry-run
     if dry_run and (not rest) and (not stt_once) and (not stt_stream_shell) and (not tts_stdin) and (not tts_test_flag) and (not setup) and (not init) and (not sys.stdin.isatty()):
-        data = ""
-        try:
-            data = sys.stdin.read()
-        except Exception:
-            data = ""
-        lines = [l.strip() for l in (data or "").splitlines() if l.strip()]
-        cmd = lines[-1] if lines else ""
-        if not cmd:
-            return 1
-        try:
-            print(cmd)
-        except BrokenPipeError:
-            return 0
-        return 0
+        return _run_pipe_dry_run()
 
     if not rest:
         shell.run()
@@ -5189,45 +5294,7 @@ def main():
 
     bin_name = os.environ.get("STTS_NLP2CMD_BIN", "nlp2cmd")
     if rest and rest[0] == bin_name and (not sys.stdin.isatty()) and any(a == "stdin" for a in rest[1:]):
-        run_mode = ("-r" in rest) or ("--run" in rest)
-        auto_confirm = ("--auto-confirm" in rest)
-
-        data = ""
-        try:
-            data = sys.stdin.read()
-        except Exception:
-            data = ""
-        lines = [l.strip() for l in (data or "").splitlines() if l.strip()]
-        text = lines[-1] if lines else ""
-        if not text:
-            cprint(Colors.RED, "❌ stdin: brak tekstu")
-            return 1
-
-        nlp2cmd_prewarm_force()
-        translated = nlp2cmd_translate(text, config=config, force=True)
-        if not translated:
-            cprint(Colors.RED, "❌ nlp2cmd: brak wygenerowanej komendy")
-            return 1
-
-        if not run_mode:
-            print(translated)
-            return 0
-
-        if dry_run:
-            print(translated)
-            return 0
-
-        if not auto_confirm:
-            if not nlp2cmd_confirm(translated):
-                return 0
-
-        ok, reason = check_command_safety(translated, config, dry_run)
-        if not ok:
-            return 0 if reason == "dry-run" else 1
-        out, code, printed = shell.run_command_any(translated)
-        if out.strip() and not printed:
-            print(out, end="", flush=True)
-        return code
+        return _run_nlp2cmd_stdin_mode(config, shell, rest, dry_run)
 
     if dry_run:
         # pipeline-friendly: all logs/prompts to stderr; stdout contains ONLY the final command

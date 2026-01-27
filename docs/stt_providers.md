@@ -4,11 +4,12 @@
 
 | Provider | Type | Best For | Install |
 |----------|------|----------|---------|
-| whisper.cpp | Offline | Docker/CI, local | auto-build |
-| Deepgram | Online | Production, accuracy | API key |
-| Vosk | Offline | RPi, embedded, low-latency | `make stt-vosk-pl` |
-| Coqui STT | Offline | Custom models | `pip install stt` |
-| Picovoice | Offline | Wake-word + STT | API key |
+| `whisper_cpp` | Offline | Docker/CI, local | auto-build |
+| `deepgram` | Online | Production, accuracy | API key |
+| `vosk` | Offline | RPi, embedded, low-latency | `make stt-vosk-pl` |
+| `faster_whisper` | Offline | GPU/CPU, high quality | `pip install faster-whisper` |
+| `coqui` | Offline | Custom models | `pip install coqui-stt` |
+| `picovoice` | Offline | Wake-word + STT | API key |
 
 ---
 
@@ -21,6 +22,19 @@
 
 ```bash
 STTS_STT_PROVIDER=whisper_cpp STTS_STT_MODEL=base ./stts --stt-file audio.wav --stt-only
+```
+
+### faster-whisper (`stt_provider=faster_whisper`)
+
+- **Type:** Offline
+- **Best for:** High accuracy + good speed (CTranslate2), GPU optional
+- **Package:** `pip install faster-whisper`
+- **Tuning:**
+  - `STTS_FASTER_WHISPER_DEVICE=auto|cpu|cuda`
+  - `STTS_FASTER_WHISPER_COMPUTE_TYPE=int8|float16|float32`
+
+```bash
+STTS_STT_PROVIDER=faster_whisper STTS_STT_MODEL=base ./stts --stt-file audio.wav --stt-only
 ```
 
 ### Deepgram (`stt_provider=deepgram`)
@@ -61,22 +75,22 @@ text = rec.FinalResult()
 ### Coqui STT (`stt_provider=coqui`)
 
 - **Type:** Offline
-- **Package:** `pip install stt`
+- **Package:** `pip install coqui-stt`
 - **Models:** Custom .tflite or .pbmm
 
 ```bash
-STTS_STT_PROVIDER=coqui STTS_COQUI_MODEL=/path/to/model.tflite ./stts --stt-file audio.wav --stt-only
+STTS_STT_PROVIDER=coqui STTS_STT_MODEL=/path/to/model.tflite ./stts --stt-file audio.wav --stt-only
 ```
 
 ### Picovoice (`stt_provider=picovoice`)
 
 - **Type:** Offline (wake-word + STT)
-- **Requires:** `STTS_PICOVOICE_KEY`
+- **Requires:** `PICOVOICE_ACCESS_KEY`
 - **Best for:** Always-on wake-word detection
 
 ---
 
-## Roadmap (not yet implemented)
+## Optional / roadmap (not yet implemented)
 
 ### DeepSpeech
 
@@ -89,24 +103,6 @@ import deepspeech
 model = deepspeech.Model("deepspeech-0.9.3-models.pbmm")
 text = model.stt(audio_buffer)
 ```
-
-### faster-whisper / Distil-Whisper
-
-- **Package:** `pip install faster-whisper`
-- **Docker:** `docker run lintoai/linto-stt-whisper`
-- **Models:** `distil-large-v3` (GPU), `tiny`/`base` (CPU/RPi)
-- **Best for:** Real-time streaming with `compute_type="int8"`
-
-```python
-from faster_whisper import WhisperModel
-model = WhisperModel("base", compute_type="int8")
-segments, _ = model.transcribe("audio.wav", language="pl")
-text = " ".join(seg.text for seg in segments)
-```
-
-**Suggested integration:**
-- Add `stt_provider=faster_whisper`
-- Streaming mode: 100–200ms chunks with partial captions
 
 ### April-ASR
 

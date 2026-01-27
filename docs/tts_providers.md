@@ -5,12 +5,12 @@
 | Provider | Type | Quality | Best For | Install |
 |----------|------|---------|----------|---------|
 | espeak | Offline | Basic | Fallback, lightweight | `apt install espeak-ng` |
-| Piper | Offline | High | Production, multilingual | auto-download |
-| RHVoice | Offline | Medium | Slavic languages | `apt install rhvoice` |
-| Coqui TTS | Offline | High | Neural voices, cloning | `pip install TTS` |
-| Kokoro | Offline | High | Low-latency neural | speaches backend |
-| Festival | Offline | Basic | Ultra-lightweight | `apt install festival` |
-| Flite | Offline | Basic | Embedded | `apt install flite` |
+| piper | Offline | High | Production, multilingual | auto-download |
+| rhvoice | Offline | Medium | Slavic languages | `apt install rhvoice` |
+| coqui-tts | Offline | High | Neural voices, multilingual | `pip install TTS` |
+| kokoro | Offline | High | Fast CPU neural | `pip install kokoro scipy` |
+| festival | Offline | Basic | Ultra-lightweight | `apt install festival` |
+| flite | Offline | Basic | Embedded | `apt install flite` |
 | spd-say | Offline | Varies | Speech-dispatcher | `apt install speech-dispatcher` |
 | say | Offline | High | macOS only | built-in |
 
@@ -45,7 +45,7 @@ espeak-ng -v af "Hallo wêreld" -w out.wav
 - **Models:** Auto-downloaded to `~/.config/stts-python/models/piper/`
 
 ```bash
-STTS_TTS_PROVIDER=piper STTS_PIPER_VOICE=pl_PL-gosia-medium ./stts
+STTS_TTS_PROVIDER=piper STTS_TTS_VOICE=pl_PL-gosia-medium ./stts
 ```
 
 **Code snippet:**
@@ -72,7 +72,7 @@ docker run -p 10200:10200 rhasspy/piper --voice pl_PL-gosia-medium
 apt install rhvoice rhvoice-polish
 
 # Use
-STTS_TTS_PROVIDER=rhvoice STTS_TTS_VOICE=pl ./stts
+STTS_TTS_PROVIDER=rhvoice STTS_TTS_VOICE=Anna ./stts
 ```
 
 **Code snippet:**
@@ -123,13 +123,7 @@ tts.tts_to_file(
 - **Best for:** Low-latency, streaming
 
 ```bash
-STTS_TTS_PROVIDER=kokoro ./stts
-```
-
-**Via Speaches backend:**
-```python
-# WebSocket API
-ws.send({"type": "input_audio", "audio": pcm_data})
+STTS_TTS_PROVIDER=kokoro STTS_TTS_VOICE=pl ./stts
 ```
 
 ### Festival (`tts_provider=festival`)
@@ -275,16 +269,7 @@ services:
 
 ## Bergamot MT Integration
 
-For multilingual TTS with translation, use Bergamot as a pre-processor:
-
-```python
-# pip install bergamot-translator
-from bergamot import Translator
-
-translator = Translator()
-text_pl = translator.translate("Hello world", source="en", target="pl")
-# Then pass text_pl to TTS
-```
+For multilingual TTS with translation, run a translator *before* passing text to TTS (external to `stts`).
 
 **Docker:**
 ```yaml
