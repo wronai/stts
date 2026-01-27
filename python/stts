@@ -3644,6 +3644,31 @@ def nlp2cmd_confirm(cmd: str) -> bool:
     return ans == "y"
 
 
+def _tokenize_shell_cmd(s: str) -> List[str]:
+    try:
+        return [t for t in shlex.split(s) if t]
+    except Exception:
+        return [t for t in (s or "").strip().split() if t]
+
+
+def _looks_like_natural_language(s: str) -> bool:
+    toks = _tokenize_shell_cmd(s)
+    if len(toks) < 2:
+        return False
+    head = (toks[0] or "").strip()
+    if not head:
+        return False
+    if head.startswith("/") or head.startswith("."):
+        return False
+    if "=" in head:
+        return False
+    if head in ("cd", "export", "set", "unset", "alias", "source", "."):
+        return False
+    if shutil.which(head):
+        return False
+    return True
+
+
 class _NLP2CMDWorker:
     def __init__(self, python_exe: str):
         self.python_exe = python_exe
@@ -4358,6 +4383,7 @@ class VoiceShell:
         while True:
             try:
                 cmd = input(PS1).strip()
+                stt_used = False
                 if cmd in ["exit", "quit", "q"]:
                     break
                 if cmd == "setup":
@@ -4386,6 +4412,7 @@ class VoiceShell:
                     else:
                         continue
                 if not cmd:
+                    stt_used = True
                     if self.config.get("mic_device") is None and self.info.os_name == "linux" and self.config.get("audio_auto_switch"):
                         det = auto_detect_mic(list_capture_devices_linux())
                         if det:
@@ -4396,8 +4423,17 @@ class VoiceShell:
                     if not cmd:
                         continue
                     translated = nlp2cmd_translate(cmd, config=self.config)
-                    if translated and nlp2cmd_confirm(translated):
-                        cmd = translated
+                    if (not translated) and _looks_like_natural_language(cmd):
+                        translated = nlp2cmd_translate(cmd, config=self.config, force=True)
+                    if translated:
+                        if nlp2cmd_confirm(translated):
+                            cmd = translated
+                        else:
+                            continue
+                    elif _looks_like_natural_language(cmd):
+                        cprint(Colors.YELLOW, "⚠️  To wygląda jak tekst naturalny, nie komenda shell.")
+                        cprint(Colors.CYAN, "💡 Włącz tłumaczenie: STTS_NLP2CMD_ENABLED=1 ./stts  (lub wpisz: nlp <tekst>)")
+                        continue
 
                 cprint(Colors.BLUE, f"▶️  {cmd}")
 

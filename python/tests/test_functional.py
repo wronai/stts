@@ -131,6 +131,13 @@ class TestFunctional(unittest.TestCase):
             else:
                 os.environ["STTS_NLP2CMD_ENABLED"] = old_enabled
 
+    def test_looks_like_natural_language_heuristic(self):
+        stts = self.stts
+        self.assertTrue(stts._looks_like_natural_language("lista folderów"))
+        self.assertFalse(stts._looks_like_natural_language("ls"))
+        self.assertFalse(stts._looks_like_natural_language("/bin/ls -la"))
+        self.assertFalse(stts._looks_like_natural_language("./script.sh"))
+
 
 if __name__ == "__main__":
     unittest.main()
