@@ -220,7 +220,20 @@ def run_nlp2cmd_stdin_mode(deps: PipelineDeps, config, shell, rest, dry_run):
     deps.nlp2cmd_prewarm_force()
     translated = deps.nlp2cmd_translate(text, config=config, force=True)
     if not translated:
-        deps.cprint(deps.Colors.RED, "❌ nlp2cmd: brak wygenerowanej komendy")
+        try:
+            print(
+                "\n".join(
+                    [
+                        "event:",
+                        "  type: nlp2cmd",
+                        f"  text: {text}",
+                        "  ok: false",
+                        "  reason: no_command",
+                    ]
+                )
+            )
+        except BrokenPipeError:
+            return 0
         return 1
 
     if not run_mode:

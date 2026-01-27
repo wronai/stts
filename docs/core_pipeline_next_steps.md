@@ -2,13 +2,59 @@
 
 Cel: po pierwszym rozbiciu `python/stts` doprowadzić do modularnego rdzenia pipeline i parytetu API z Node.js, bez zmiany zachowania.
 
-## 1) Proponowany układ modułów (Python)
+## ✅ Zrealizowane (v0.1.36)
+
+### Struktura `stts_core`
 
 ```
 python/stts_core/
-  __init__.py
+  __init__.py           # eksporty publiczne
+  pipeline_helpers.py   # PipelineDeps + funkcje run_* (legacy)
+  pipeline_utils.py     # argv_to_cmd, expand_placeholders
+  pipeline.py           # PipelineMode, PipelineRequest, PipelineResult, run_pipeline()
+```
+
+### Kontrakt pipeline (zaimplementowany)
+
+```python
+class PipelineMode(Enum):
+    STT_ONCE = auto()
+    STT_STREAM_SHELL = auto()
+    STT_FILE_PLACEHOLDER = auto()
+    STT_FILE_DEFAULT = auto()
+    NLP2CMD_PARALLEL = auto()
+    NLP2CMD_STDIN = auto()
+    PIPE_DRY_RUN = auto()
+    INTERACTIVE = auto()
+
+@dataclass
+class PipelineRequest:
+    mode: PipelineMode
+    config: dict
+    deps: PipelineDeps
+    shell: Any  # VoiceShell
+    stt_file: Optional[str] = None
+    stt_only: bool = False
+    dry_run: bool = False
+    rest: List[str] = field(default_factory=list)
+    stream_shell_cmd: Optional[str] = None
+
+@dataclass
+class PipelineResult:
+    exit_code: int
+    output: Optional[str] = None
+    command: Optional[str] = None
+    error: Optional[str] = None
+
+def run_pipeline(req: PipelineRequest) -> PipelineResult: ...
+def detect_pipeline_mode(...) -> Optional[PipelineMode]: ...
+```
+
+## 1) Dalsze kroki modularyzacji
+
+```
+python/stts_core/
   config.py          # load_config + merge env/CLI + walidacja
-  contracts.py       # PipelineRequest/PipelineResult
   input_sources.py   # STT mic / STT file / stdin / placeholder
   stages/
     stt.py           # STT provider selection + listen
@@ -16,35 +62,9 @@ python/stts_core/
     nlp2cmd.py       # nlp2cmd translate + confirm
     execute.py       # safe-mode + dry-run + stream/no-stream
     tts.py           # auto-tts + tts stdin/test
-  pipeline.py        # run_pipeline(req) -> res
 ```
 
 Zasada: `python/stts` zostaje jako CLI + dispatch (bez logiki biznesowej), a `stts_core` przejmuje pipeline.
-
-## 2) Kontrakt pipeline (propozycja)
-
-```python
-@dataclass
-class PipelineRequest:
-    config: dict
-    mode: Literal["stt_file", "stt_once", "stt_stream_shell", "stdin", "cli"]
-    stt_file: Optional[str] = None
-    cmd_template: Optional[str] = None
-    raw_text: Optional[str] = None
-    dry_run: bool = False
-    safe_mode: bool = True
-    stream: bool = False
-
-@dataclass
-class PipelineResult:
-    stt_text: Optional[str]
-    normalized_text: Optional[str]
-    translated_cmd: Optional[str]
-    executed_cmd: Optional[str]
-    stdout: str
-    exit_code: int
-    tts_text: Optional[str]
-```
 
 ## 3) Wejścia i strategie
 

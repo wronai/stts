@@ -39,23 +39,38 @@ import re
 import signal
 import difflib
 import functools
+import select
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional, List, Tuple, Dict, Any
+
+
+def _output_format() -> str:
+    return os.environ.get("STTS_OUTPUT_FORMAT", "yaml").strip().lower()
+
+
+def _yaml_mode() -> bool:
+    return _output_format() in ("yaml", "yml")
+
+
+def _yaml_out():
+    return sys.__stdout__ if _yaml_mode() else sys.stdout
+
+
+def _text_out():
+    return sys.stderr if _yaml_mode() else sys.stdout
 
 HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-from stts_core.pipeline_helpers import (
-    PipelineDeps,
-    run_nlp2cmd_parallel_fastpath,
-    run_nlp2cmd_stdin_mode,
-    run_pipe_dry_run,
-    run_stt_file_default_mode,
-    run_stt_file_placeholder_mode,
-    run_stt_once,
-    run_stt_stream_shell,
+from stts_core.pipeline_helpers import PipelineDeps
+from stts_core.pipeline import (
+    PipelineMode,
+    PipelineRequest,
+    PipelineResult,
+    run_pipeline,
+    detect_pipeline_mode,
 )
 
 from stts_core.pipeline_utils import argv_to_cmd as _argv_to_cmd_core
@@ -234,7 +249,31 @@ class Colors:
 
 def cprint(color: str, text: str, end: str = "\n"):
     try:
-        print(f"{color}{text}{Colors.NC}", end=end, flush=True)
+        print(f"{color}{text}{Colors.NC}", end=end, file=_text_out(), flush=True)
+    except BrokenPipeError:
+        return
+
+
+def build_stt_event_yaml(text: str, *, action: str, translated: Optional[str] = None, reason: Optional[str] = None) -> str:
+    lines = [
+        "event:",
+        "  type: stt",
+        f"  text: {_yaml_fmt_scalar(text)}",
+        f"  translated: {_yaml_fmt_scalar(translated)}",
+        f"  action: {_yaml_fmt_scalar(action)}",
+        f"  reason: {_yaml_fmt_scalar(reason)}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def emit_stt_event_yaml(text: str, *, action: str, translated: Optional[str] = None, reason: Optional[str] = None) -> None:
+    try:
+        v = os.environ.get("STTS_YAML_EVENTS", "1").strip().lower()
+        if v in ("0", "false", "no", "n"):
+            return
+        out = _yaml_out()
+        out.write(build_stt_event_yaml(text, action=action, translated=translated, reason=reason))
+        out.flush()
     except BrokenPipeError:
         return
 
@@ -3552,6 +3591,9 @@ def nlp2cmd_translate(text: str, config: Optional[dict] = None, force: bool = Fa
             if cmd:
                 cmd2 = _normalize_cmd(cmd)
                 return cmd2 or None
+        allow_cli_fallback = os.environ.get("STTS_NLP2CMD_FORCE_CLI", "0").strip().lower() in ("1", "true", "yes", "y")
+        if not allow_cli_fallback:
+            return None
     elif _nlp2cmd_parallel_enabled(config):
         nlp2cmd_prewarm(config)
         if _NLP2CMD_WORKER is not None:
@@ -4430,10 +4472,15 @@ class VoiceShell:
                             cmd = translated
                         else:
                             continue
-                    elif _looks_like_natural_language(cmd):
-                        cprint(Colors.YELLOW, "⚠️  To wygląda jak tekst naturalny, nie komenda shell.")
-                        cprint(Colors.CYAN, "💡 Włącz tłumaczenie: STTS_NLP2CMD_ENABLED=1 ./stts  (lub wpisz: nlp <tekst>)")
-                        continue
+                    else:
+                        allow_raw = os.environ.get("STTS_EXEC_RAW_STT", "0").strip().lower() in ("1", "true", "yes", "y")
+                        if not allow_raw:
+                            emit_stt_event_yaml(cmd, action="skipped", translated=None, reason="no_translation")
+                            continue
+                        if _looks_like_natural_language(cmd):
+                            cprint(Colors.YELLOW, "⚠️  To wygląda jak tekst naturalny, nie komenda shell.")
+                            cprint(Colors.CYAN, "💡 Włącz tłumaczenie: STTS_NLP2CMD_ENABLED=1 ./stts  (lub wpisz: nlp <tekst>)")
+                            continue
 
                 cprint(Colors.BLUE, f"▶️  {cmd}")
 
@@ -5164,44 +5211,49 @@ def main():
         )
         return int(code or 0)
 
-    if stt_stream_shell:
-        return run_stt_stream_shell(deps, shell, config, stt_file, stream_shell_cmd, dry_run)
+    # Detect pipeline mode using unified contract
+    mode = detect_pipeline_mode(
+        stt_once=stt_once,
+        stt_stream_shell=stt_stream_shell,
+        stt_file=stt_file,
+        stt_only=stt_only,
+        dry_run=dry_run,
+        rest=rest,
+    )
 
-    if stt_once:
-        # Pipeline-friendly mode: transcript to stdout, all prompts/status to stderr
-        return run_stt_once(deps, shell, stt_file)
+    # Handle NLP2CMD parallel fastpath (config-dependent)
+    if mode is None and config.get("nlp2cmd_parallel"):
+        bin_name = os.environ.get("STTS_NLP2CMD_BIN", "nlp2cmd")
+        if rest and rest[0] == bin_name and any("{STT}" in a for a in rest):
+            mode = PipelineMode.NLP2CMD_PARALLEL
 
-    if config.get("nlp2cmd_parallel"):
-        code = run_nlp2cmd_parallel_fastpath(deps, config, shell, stt_file, stt_only, dry_run, rest)
-        if code is not None:
-            return code
+    # Handle stt_only + placeholder as special case (print STT only)
+    if mode == PipelineMode.STT_FILE_PLACEHOLDER and stt_only:
+        nlp2cmd_prewarm(config)
+        text = shell.listen(stt_file=stt_file)
+        print(text)
+        return 0 if text else 1
 
-    if stt_file:
-        # When user provides an explicit command template with {STT}/{STT_STREAM}, treat it as
-        # placeholder expansion mode (useful for CI/docker and one-shot runs).
-        if rest and any(("{STT}" in a) or ("{STT_STREAM}" in a) for a in rest):
-            if stt_only:
-                nlp2cmd_prewarm(config)
-                text = shell.listen(stt_file=stt_file)
-                print(text)
-                return 0 if text else 1
-            return run_stt_file_placeholder_mode(deps, config, shell, stt_file, dry_run, rest)
+    # Execute pipeline mode if detected
+    if mode is not None:
+        req = PipelineRequest(
+            mode=mode,
+            config=config,
+            deps=deps,
+            shell=shell,
+            stt_file=stt_file,
+            stt_only=stt_only,
+            dry_run=dry_run,
+            rest=rest,
+            stream_shell_cmd=stream_shell_cmd,
+        )
+        result = run_pipeline(req)
+        return result.exit_code
 
-        # Default: execute transcript (with optional nlp2cmd translation)
-        return run_stt_file_default_mode(deps, config, shell, stt_file, stt_only, dry_run)
-
-    # Pipeline-friendly: allow piping a command into stts and asking for dry-run printing.
-    # Example: echo "rm -rf /" | ./stts --dry-run
-    if dry_run and (not rest) and (not stt_once) and (not stt_stream_shell) and (not tts_stdin) and (not tts_test_flag) and (not setup) and (not init) and (not sys.stdin.isatty()):
-        return run_pipe_dry_run()
-
+    # Interactive mode: no pipeline flags, run VoiceShell REPL
     if not rest:
         shell.run()
         return 0
-
-    bin_name = os.environ.get("STTS_NLP2CMD_BIN", "nlp2cmd")
-    if rest and rest[0] == bin_name and (not sys.stdin.isatty()) and any(a == "stdin" for a in rest[1:]):
-        return run_nlp2cmd_stdin_mode(deps, config, shell, rest, dry_run)
 
     if dry_run:
         # pipeline-friendly: all logs/prompts to stderr; stdout contains ONLY the final command

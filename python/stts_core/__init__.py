@@ -9,8 +9,24 @@ from .pipeline_helpers import (
     run_stt_stream_shell,
 )
 
+from .pipeline import (
+    PipelineMode,
+    PipelineRequest,
+    PipelineResult,
+    run_pipeline,
+    detect_pipeline_mode,
+)
+
 __all__ = [
+    # Deps
     "PipelineDeps",
+    # Pipeline contract
+    "PipelineMode",
+    "PipelineRequest",
+    "PipelineResult",
+    "run_pipeline",
+    "detect_pipeline_mode",
+    # Legacy helpers (for backward compat)
     "run_nlp2cmd_parallel_fastpath",
     "run_nlp2cmd_stdin_mode",
     "run_pipe_dry_run",
