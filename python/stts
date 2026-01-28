@@ -70,6 +70,10 @@ if str(HERE) not in sys.path:
 
 from stts_core import runtime as _runtime
 from stts_core import config as _config
+from stts_core import cli as _cli
+from stts_core import registry as _registry
+from stts_core.providers import STTProvider as _BaseSTTProvider
+from stts_core.providers import TTSProvider as _BaseTTSProvider
 
 from stts_core.pipeline_helpers import PipelineDeps
 from stts_core.pipeline import (
@@ -738,149 +742,33 @@ def detect_system(fast: bool = False) -> SystemInfo:
 
 
 def load_config() -> dict:
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    cfg = DEFAULT_CONFIG.copy()
-    path = _get_config_file_for_load()
-    if path is not None and path.exists():
-        try:
-            if path.suffix in (".yaml", ".yml"):
-                cfg.update(_parse_simple_yaml(path.read_text(encoding="utf-8")))
-            else:
-                cfg.update(json.loads(path.read_text(encoding="utf-8")))
-            return apply_env_overrides(cfg)
-        except Exception:
-            pass
-    return apply_env_overrides(DEFAULT_CONFIG.copy())
+    return _config.load_config(apply_env_overrides=apply_env_overrides)
 
 
 def save_config(config: dict) -> None:
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    path = _get_config_file_for_save()
-    if path.suffix in (".yaml", ".yml"):
-        path.write_text(_dump_simple_yaml(config), encoding="utf-8")
-    else:
-        path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+    _config.save_config(config)
 
 
 def _normalize_config_format(v: Optional[str]) -> Optional[str]:
-    if not v:
-        return None
-    s = v.strip().lower()
-    if s in ("yaml", "yml"):
-        return "yaml"
-    if s in ("json",):
-        return "json"
-    return None
+    return _config.normalize_config_format(v)
 
 
 def _get_config_file_for_load() -> Optional[Path]:
-    fmt = _normalize_config_format(os.environ.get("STTS_CONFIG_FORMAT"))
-    if fmt == "yaml":
-        if CONFIG_FILE_YAML.exists():
-            return CONFIG_FILE_YAML
-        if CONFIG_FILE_YML.exists():
-            return CONFIG_FILE_YML
-        return CONFIG_FILE_YAML
-    if fmt == "json":
-        return CONFIG_FILE_JSON
-
-    # auto-detect: prefer YAML if present
-    if CONFIG_FILE_YAML.exists():
-        return CONFIG_FILE_YAML
-    if CONFIG_FILE_YML.exists():
-        return CONFIG_FILE_YML
-    if CONFIG_FILE_JSON.exists():
-        return CONFIG_FILE_JSON
-    return CONFIG_FILE_JSON
+    return _config.get_config_file_for_load()
 
 
 def _get_config_file_for_save() -> Path:
-    fmt = _normalize_config_format(os.environ.get("STTS_CONFIG_FORMAT"))
-    if fmt == "yaml":
-        # preserve existing .yml if used
-        if CONFIG_FILE_YML.exists() and not CONFIG_FILE_YAML.exists():
-            return CONFIG_FILE_YML
-        return CONFIG_FILE_YAML
-    if fmt == "json":
-        return CONFIG_FILE_JSON
-
-    # auto: save where user already has config
-    if CONFIG_FILE_YAML.exists():
-        return CONFIG_FILE_YAML
-    if CONFIG_FILE_YML.exists():
-        return CONFIG_FILE_YML
-    if CONFIG_FILE_JSON.exists():
-        return CONFIG_FILE_JSON
-    return CONFIG_FILE_JSON
+    return _config.get_config_file_for_save()
 
 
 def _parse_simple_yaml(text: str) -> dict:
     """Very small YAML subset parser for flat key: value maps."""
-    out: dict = {}
-    for raw in (text or "").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if ":" not in line:
-            continue
-        k, v = line.split(":", 1)
-        key = k.strip()
-        if not key:
-            continue
-        val_s = v.strip()
-        if not val_s or val_s in ("null", "~"):
-            out[key] = None
-            continue
-
-        if (val_s.startswith("\"") and val_s.endswith("\"")) or (val_s.startswith("'") and val_s.endswith("'")):
-            out[key] = val_s[1:-1]
-            continue
-
-        low = val_s.lower()
-        if low in ("true", "yes", "y", "on"):
-            out[key] = True
-            continue
-        if low in ("false", "no", "n", "off"):
-            out[key] = False
-            continue
-
-        try:
-            if any(ch in val_s for ch in (".", "e", "E")):
-                out[key] = float(val_s)
-            else:
-                out[key] = int(val_s)
-            continue
-        except Exception:
-            pass
-
-        out[key] = val_s
-    return out
+    return _config.parse_simple_yaml(text)
 
 
 def _dump_simple_yaml(data: dict) -> str:
     """Dump flat dict to YAML (simple key: value)."""
-    def fmt(v):
-        if v is None:
-            return "null"
-        if isinstance(v, bool):
-            return "true" if v else "false"
-        if isinstance(v, (int, float)):
-            return str(v)
-        s = str(v)
-        if s == "":
-            return "\"\""
-        needs_quote = any(ch.isspace() for ch in s) or any(ch in s for ch in (":", "#", "\"", "'"))
-        if needs_quote:
-            s2 = s.replace("\\", "\\\\").replace("\"", "\\\"")
-            return f"\"{s2}\""
-        return s
-
-    lines = []
-    for k in sorted(data.keys()):
-        if not isinstance(k, str):
-            continue
-        lines.append(f"{k}: {fmt(data[k])}")
-    return "\n".join(lines) + "\n"
+    return _config.dump_simple_yaml(data)
 
 
 def _run_text(cmd: List[str], timeout: int = 3) -> str:
@@ -1508,38 +1396,8 @@ class TextNormalizer:
         return TextNormalizer.PHONETIC_EN_CORRECTIONS.get(m[0])
 
 
-class STTProvider:
-    name: str = "base"
-    description: str = "Base"
-    min_ram_gb: float = 0.5
-    models: List[Tuple[str, str, float]] = []
-
-    @classmethod
-    def is_available(cls, info: SystemInfo):
-        return False, "Not implemented"
-
-    @classmethod
-    def install(cls, info: SystemInfo) -> bool:
-        return False
-
-    @classmethod
-    def get_recommended_model(cls, info: SystemInfo) -> Optional[str]:
-        return None
-
-    def __init__(
-        self,
-        model: Optional[str] = None,
-        language: str = "pl",
-        config: Optional[dict] = None,
-        info: Optional[SystemInfo] = None,
-    ):
-        self.model = model
-        self.language = language
-        self.config = config or {}
-        self.info = info
-
-    def transcribe(self, audio_path: str) -> str:
-        raise NotImplementedError
+class STTProvider(_BaseSTTProvider):
+    pass
 
 
 class WhisperCppSTT(STTProvider):
@@ -2368,24 +2226,8 @@ class FasterWhisperSTT(STTProvider):
             return ""
 
 
-class TTSProvider:
-    name: str = "base"
-
-    @classmethod
-    def is_available(cls, info: SystemInfo):
-        return False, "Not implemented"
-
-    @classmethod
-    def install(cls, info: SystemInfo) -> bool:
-        return False
-
-    def __init__(self, voice: str = "pl", config: Optional[dict] = None, info: Optional[SystemInfo] = None):
-        self.voice = voice
-        self.config = config or {}
-        self.info = info
-
-    def speak(self, text: str) -> None:
-        raise NotImplementedError
+class TTSProvider(_BaseTTSProvider):
+    pass
 
 
 class EspeakTTS(TTSProvider):
@@ -2975,25 +2817,29 @@ class KokoroTTS(TTSProvider):
             cprint(Colors.YELLOW, f"⚠️ Kokoro TTS error: {e}")
 
 
-STT_PROVIDERS = {
-    "whisper_cpp": WhisperCppSTT,
-    "deepgram": DeepgramSTT,
-    "vosk": VoskSTT,
-    "coqui": CoquiSTT,
-    "picovoice": PicovoiceSTT,
-    "faster_whisper": FasterWhisperSTT,
-}
-TTS_PROVIDERS = {
-    "espeak": EspeakTTS,
-    "piper": PiperTTS,
-    "spd-say": SpdSayTTS,
-    "say": SayTTS,
-    "flite": FliteTTS,
-    "coqui-tts": CoquiTTS,
-    "festival": FestivalTTS,
-    "rhvoice": RHVoiceTTS,
-    "kokoro": KokoroTTS,
-}
+STT_PROVIDERS = _registry.build_stt_providers(
+    [
+        ("whisper_cpp", WhisperCppSTT),
+        ("deepgram", DeepgramSTT),
+        ("vosk", VoskSTT),
+        ("coqui", CoquiSTT),
+        ("picovoice", PicovoiceSTT),
+        ("faster_whisper", FasterWhisperSTT),
+    ]
+)
+TTS_PROVIDERS = _registry.build_tts_providers(
+    [
+        ("espeak", EspeakTTS),
+        ("piper", PiperTTS),
+        ("spd-say", SpdSayTTS),
+        ("say", SayTTS),
+        ("flite", FliteTTS),
+        ("coqui-tts", CoquiTTS),
+        ("festival", FestivalTTS),
+        ("rhvoice", RHVoiceTTS),
+        ("kokoro", KokoroTTS),
+    ]
+)
 
 
 def _ts() -> str:
@@ -4617,137 +4463,7 @@ class VoiceShell:
 
 
 def parse_args(argv: List[str]):
-    stt_file = None
-    stt_only = False
-    stt_once = False
-    stt_stream_shell = False
-    stream_shell_cmd = None
-    setup = False
-    init = None
-    tts_provider = None
-    tts_voice = None
-    tts_stdin = False
-    tts_test = False
-    tts_test_text = None
-    install_piper = False
-    download_piper_voice = None
-    help_ = False
-    dry_run = False
-    safe_mode = False
-    stream_cmd = None
-    fast_start = None
-    stt_gpu_layers = None
-    stt_provider = None
-    stt_model = None
-    timeout_s = None
-    vad_silence_ms = None
-    list_stt = False
-    list_tts = False
-    nlp2cmd_parallel = None
-    daemon_mode = False
-    nlp2cmd_url = None
-    nlp2cmd_timeout_s = None
-    daemon_log = None
-    daemon_no_execute = False
-    daemon_triggers: List[str] = []
-    daemon_triggers_file = None
-    daemon_wake_word = None
-    rest: List[str] = []
-
-    it = iter(argv)
-    for a in it:
-        if a == "--stt-provider":
-            stt_provider = next(it, None)
-        elif a == "--stt-model":
-            stt_model = next(it, None)
-        elif a == "--timeout":
-            try:
-                timeout_s = float((next(it, None) or "").strip())
-            except Exception:
-                timeout_s = None
-        elif a == "--vad-silence-ms":
-            try:
-                vad_silence_ms = int((next(it, None) or "").strip())
-            except Exception:
-                vad_silence_ms = None
-        elif a == "--stt-file":
-            stt_file = next(it, None)
-        elif a == "--stt-only":
-            stt_only = True
-        elif a == "--stt-once":
-            stt_once = True
-        elif a == "--stt-stream-shell":
-            stt_stream_shell = True
-        elif a == "--cmd":
-            stream_shell_cmd = next(it, None)
-        elif a == "--setup":
-            setup = True
-        elif a == "--init":
-            init = next(it, None)
-        elif a == "--tts-provider":
-            tts_provider = next(it, None)
-        elif a == "--tts-voice":
-            tts_voice = next(it, None)
-        elif a == "--tts-stdin":
-            tts_stdin = True
-        elif a == "--tts-test":
-            tts_test = True
-            tts_test_text = next(it, None)
-        elif a == "--install-piper":
-            install_piper = True
-        elif a == "--download-piper-voice":
-            download_piper_voice = next(it, None)
-        elif a == "--dry-run":
-            dry_run = True
-        elif a == "--safe-mode":
-            safe_mode = True
-        elif a == "--stream":
-            stream_cmd = True
-        elif a == "--no-stream":
-            stream_cmd = False
-        elif a == "--fast-start":
-            fast_start = True
-        elif a == "--full-start":
-            fast_start = False
-        elif a == "--stt-gpu-layers":
-            try:
-                stt_gpu_layers = int((next(it, None) or "0").strip())
-            except Exception:
-                stt_gpu_layers = 0
-        elif a == "--nlp2cmd-parallel":
-            nlp2cmd_parallel = True
-        elif a == "--no-nlp2cmd-parallel":
-            nlp2cmd_parallel = False
-        elif a == "--list-stt":
-            list_stt = True
-        elif a == "--list-tts":
-            list_tts = True
-        elif a in ("--daemon", "--service"):
-            daemon_mode = True
-        elif a == "--nlp2cmd-url":
-            nlp2cmd_url = next(it, None)
-        elif a == "--nlp2cmd-timeout":
-            try:
-                nlp2cmd_timeout_s = float((next(it, None) or "").strip())
-            except Exception:
-                nlp2cmd_timeout_s = None
-        elif a == "--daemon-log":
-            daemon_log = next(it, None)
-        elif a == "--no-execute":
-            daemon_no_execute = True
-        elif a == "--trigger":
-            v = next(it, None)
-            if v:
-                daemon_triggers.append(v)
-        elif a == "--triggers-file":
-            daemon_triggers_file = next(it, None)
-        elif a == "--wake-word":
-            daemon_wake_word = next(it, None)
-        elif a in ("--help", "-h"):
-            help_ = True
-        else:
-            rest.append(a)
-    return stt_file, stt_only, stt_once, stt_stream_shell, stream_shell_cmd, setup, init, tts_provider, tts_voice, tts_stdin, tts_test, tts_test_text, install_piper, download_piper_voice, help_, dry_run, safe_mode, stream_cmd, fast_start, stt_gpu_layers, stt_provider, stt_model, timeout_s, vad_silence_ms, list_stt, list_tts, nlp2cmd_parallel, daemon_mode, nlp2cmd_url, nlp2cmd_timeout_s, daemon_log, daemon_no_execute, daemon_triggers, daemon_triggers_file, daemon_wake_word, rest
+    return _cli.parse_args(argv)
 
 
 def tts_test(shell: "VoiceShell", text: str) -> int:
