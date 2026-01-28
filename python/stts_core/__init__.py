@@ -17,9 +17,13 @@ from .pipeline import (
     detect_pipeline_mode,
 )
 
+from .shell import VoiceShell
+
 __all__ = [
     # Deps
     "PipelineDeps",
+    # Shell
+    "VoiceShell",
     # Pipeline contract
     "PipelineMode",
     "PipelineRequest",

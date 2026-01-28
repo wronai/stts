@@ -73,6 +73,7 @@ from stts_core import config as _config
 from stts_core import cli as _cli
 from stts_core import registry as _registry
 from stts_core import nlp2cmd_client as _nlp2cmd_client
+from stts_core import shell as _shell_core
 from stts_core.providers import STTProvider as _BaseSTTProvider
 from stts_core.providers import TTSProvider as _BaseTTSProvider
 
@@ -3744,8 +3745,7 @@ def nlp2cmd_service_health(url: str, timeout: float = 2.5) -> bool:
     ok, _ = _nlp2cmd_client.nlp2cmd_service_health_ex(url=url, timeout=timeout)
     return ok
 
-
-class VoiceShell:
+class _LegacyVoiceShell:
     def __init__(self, config: dict):
         self.config = config
         self.info = detect_system(fast=bool(self.config.get("fast_start", True)))
@@ -4443,6 +4443,64 @@ class VoiceShell:
 
         log("👋 Daemon stopped")
         return 0
+
+
+def _build_voice_shell_deps():
+    class _Deps:
+        pass
+
+    deps = _Deps()
+    deps.detect_system = detect_system
+    deps.HISTORY_FILE = HISTORY_FILE
+    deps.readline = readline
+
+    deps.STT_PROVIDERS = STT_PROVIDERS
+    deps.TTS_PROVIDERS = TTS_PROVIDERS
+    deps.EspeakTTS = EspeakTTS
+
+    deps.cprint = cprint
+    deps.Colors = Colors
+    deps._ts = _ts
+
+    deps.check_wake_word = check_wake_word
+    deps.record_audio_vad = record_audio_vad
+    deps.record_audio = record_audio
+    deps.analyze_wav = analyze_wav
+    deps.list_capture_devices_linux = list_capture_devices_linux
+    deps.list_playback_devices_linux = list_playback_devices_linux
+    deps.get_active_pulse_devices = get_active_pulse_devices
+    deps.choose_device_interactive = choose_device_interactive
+    deps.mic_meter = mic_meter
+    deps.auto_detect_mic = auto_detect_mic
+    deps.interactive_setup = interactive_setup
+
+    deps.save_config = save_config
+
+    deps._yaml_mode = _yaml_mode
+
+    deps.nlp2cmd_prewarm = nlp2cmd_prewarm
+    deps.nlp2cmd_translate = nlp2cmd_translate
+    deps.nlp2cmd_confirm = nlp2cmd_confirm
+    deps.emit_stt_event_yaml = emit_stt_event_yaml
+    deps._looks_like_natural_language = _looks_like_natural_language
+
+    deps.is_dangerous_command = is_dangerous_command
+
+    deps._wake_word_phrase_to_pattern = _wake_word_phrase_to_pattern
+    deps.generate_wake_word_variants = generate_wake_word_variants
+    deps.normalize_daemon_command = normalize_daemon_command
+    deps.match_trigger = match_trigger
+    deps.check_command_safety = check_command_safety
+
+    deps.nlp2cmd_service_health = nlp2cmd_service_health
+    deps.nlp2cmd_service_query = nlp2cmd_service_query
+
+    return deps
+
+
+class VoiceShell(_shell_core.VoiceShell):
+    def __init__(self, config: dict):
+        super().__init__(config=config, deps=_build_voice_shell_deps())
 
 
 def parse_args(argv: List[str]):
