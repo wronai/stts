@@ -72,6 +72,7 @@ from stts_core import runtime as _runtime
 from stts_core import config as _config
 from stts_core import cli as _cli
 from stts_core import registry as _registry
+from stts_core import nlp2cmd_client as _nlp2cmd_client
 from stts_core.providers import STTProvider as _BaseSTTProvider
 from stts_core.providers import TTSProvider as _BaseTTSProvider
 
@@ -3718,48 +3719,30 @@ def nlp2cmd_service_query(
     timeout: float = 30.0,
 ) -> Optional[Dict[str, Any]]:
     """Query nlp2cmd HTTP service. Returns response dict or None on error."""
-    try:
-        import urllib.request
-        import urllib.error
+    data, err = _nlp2cmd_client.nlp2cmd_service_query_ex(
+        query=query,
+        url=url,
+        execute=execute,
+        timeout=timeout,
+    )
+    if err is not None:
+        try:
+            import urllib.error
 
-        endpoint = f"{url.rstrip('/')}/query"
-        payload = json.dumps({
-            "query": query,
-            "dsl": "shell",
-            "execute": execute,
-        }).encode("utf-8")
-
-        req = urllib.request.Request(
-            endpoint,
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            return data
-    except urllib.error.URLError as e:
-        cprint(Colors.RED, f"❌ nlp2cmd service error: {e}")
+            if isinstance(err, urllib.error.URLError):
+                cprint(Colors.RED, f"❌ nlp2cmd service error: {err}")
+            else:
+                cprint(Colors.RED, f"❌ nlp2cmd query error: {err}")
+        except Exception:
+            cprint(Colors.RED, f"❌ nlp2cmd query error: {err}")
         return None
-    except Exception as e:
-        cprint(Colors.RED, f"❌ nlp2cmd query error: {e}")
-        return None
+    return data
 
 
 def nlp2cmd_service_health(url: str, timeout: float = 2.5) -> bool:
     """Check if nlp2cmd service is reachable via GET /health."""
-    try:
-        import urllib.request
-
-        endpoint = f"{url.rstrip('/')}/health"
-        with urllib.request.urlopen(endpoint, timeout=timeout) as resp:
-            if getattr(resp, "status", 0) != 200:
-                return False
-            data = json.loads(resp.read().decode("utf-8"))
-            return (data or {}).get("status") == "healthy"
-    except Exception:
-        return False
+    ok, _ = _nlp2cmd_client.nlp2cmd_service_health_ex(url=url, timeout=timeout)
+    return ok
 
 
 class VoiceShell:
