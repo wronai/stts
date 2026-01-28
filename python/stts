@@ -46,30 +46,30 @@ from typing import Optional, List, Tuple, Dict, Any
 
 
 def _output_format() -> str:
-    return os.environ.get("STTS_OUTPUT_FORMAT", "yaml").strip().lower()
+    return _runtime.output_format()
 
 
 def _yaml_mode() -> bool:
-    return _output_format() in ("yaml", "yml")
+    return _runtime.yaml_mode()
 
 
 def _yaml_out():
-    return sys.__stdout__ if _yaml_mode() else sys.stdout
+    return _runtime.yaml_out()
 
 
 def _text_out():
-    return sys.stderr if _yaml_mode() else sys.stdout
+    return _runtime.text_out()
 
 
 def _stdout_isatty() -> bool:
-    try:
-        return sys.__stdout__.isatty() if _yaml_mode() else sys.stdout.isatty()
-    except Exception:
-        return False
+    return _runtime.stdout_isatty()
 
 HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
+
+from stts_core import runtime as _runtime
+from stts_core import config as _config
 
 from stts_core.pipeline_helpers import PipelineDeps
 from stts_core.pipeline import (
@@ -85,83 +85,23 @@ from stts_core.pipeline_utils import expand_placeholders as _expand_placeholders
 
 
 def load_dotenv() -> None:
-    candidates = []
-    try:
-        here = Path(__file__).resolve().parent
-        candidates.append(Path.cwd() / ".env")
-        candidates.append(here / ".env")
-        candidates.append(here.parent / ".env")
-    except Exception:
-        pass
-
-    for p in candidates:
-        try:
-            if not p.exists() or not p.is_file():
-                continue
-            for line in p.read_text(encoding="utf-8").splitlines():
-                s = line.strip()
-                if not s or s.startswith("#"):
-                    continue
-                if s.lower().startswith("export "):
-                    s = s[7:].strip()
-                if "=" not in s:
-                    continue
-                k, v = s.split("=", 1)
-                k = k.strip()
-                v = v.strip().strip('"').strip("'")
-                if not k:
-                    continue
-                os.environ.setdefault(k, v)
-            break
-        except Exception:
-            continue
+    _runtime.load_dotenv()
 
 
 load_dotenv()
 
 # In pipeline usage, prefer default SIGPIPE behavior to avoid noisy BrokenPipeError
-try:
-    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
-except Exception:
-    pass
+_runtime.set_sigpipe_default()
 
-_CONFIG_DIR_ENV = os.environ.get("STTS_CONFIG_DIR")
-CONFIG_DIR = (Path(_CONFIG_DIR_ENV).expanduser() if _CONFIG_DIR_ENV else (Path.home() / ".config" / "stts-python"))
-CONFIG_FILE_JSON = CONFIG_DIR / "config.json"
-CONFIG_FILE_YAML = CONFIG_DIR / "config.yaml"
-CONFIG_FILE_YML = CONFIG_DIR / "config.yml"
-MODELS_DIR = CONFIG_DIR / "models"
-BIN_DIR = CONFIG_DIR / "bin"
-HISTORY_FILE = CONFIG_DIR / "history"
+CONFIG_DIR = _config.CONFIG_DIR
+CONFIG_FILE_JSON = _config.CONFIG_FILE_JSON
+CONFIG_FILE_YAML = _config.CONFIG_FILE_YAML
+CONFIG_FILE_YML = _config.CONFIG_FILE_YML
+MODELS_DIR = _config.MODELS_DIR
+BIN_DIR = _config.BIN_DIR
+HISTORY_FILE = _config.HISTORY_FILE
 
-DEFAULT_CONFIG = {
-    "stt_provider": None,
-    "tts_provider": None,
-    "stt_model": None,
-    "stt_gpu_layers": 0,
-    "tts_voice": "pl",
-    "language": "pl",
-    "timeout": 5,
-    "auto_tts": True,
-    "stream_cmd": False,
-    "fast_start": True,
-    "mic_device": None,
-    "speaker_device": None,
-    "audio_auto_switch": True,
-    "prompt_voice_first": True,
-    "startup_tts": True,
-    "vad_enabled": True,
-    "vad_silence_ms": 800,
-    "vad_threshold_db": -42,
-    "safe_mode": False,
-    "vosk_auto_install": True,
-    "vosk_auto_download": True,
-    "piper_auto_install": True,
-    "piper_auto_download": True,
-    "piper_release_tag": "2023.11.14-2",
-    "piper_voice_version": "v1.0.0",
-    "nlp2cmd_parallel": False,
-}
+DEFAULT_CONFIG = _config.DEFAULT_CONFIG.copy()
 
 
 def apply_env_overrides(config: dict) -> dict:
@@ -388,149 +328,33 @@ def detect_system(fast: bool = False) -> SystemInfo:
 
 
 def load_config() -> dict:
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    cfg = DEFAULT_CONFIG.copy()
-    path = _get_config_file_for_load()
-    if path is not None and path.exists():
-        try:
-            if path.suffix in (".yaml", ".yml"):
-                cfg.update(_parse_simple_yaml(path.read_text(encoding="utf-8")))
-            else:
-                cfg.update(json.loads(path.read_text(encoding="utf-8")))
-            return apply_env_overrides(cfg)
-        except Exception:
-            pass
-    return apply_env_overrides(DEFAULT_CONFIG.copy())
+    return _config.load_config(apply_env_overrides=apply_env_overrides)
 
 
 def save_config(config: dict) -> None:
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    path = _get_config_file_for_save()
-    if path.suffix in (".yaml", ".yml"):
-        path.write_text(_dump_simple_yaml(config), encoding="utf-8")
-    else:
-        path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+    _config.save_config(config)
 
 
 def _normalize_config_format(v: Optional[str]) -> Optional[str]:
-    if not v:
-        return None
-    s = v.strip().lower()
-    if s in ("yaml", "yml"):
-        return "yaml"
-    if s in ("json",):
-        return "json"
-    return None
+    return _config.normalize_config_format(v)
 
 
 def _get_config_file_for_load() -> Optional[Path]:
-    fmt = _normalize_config_format(os.environ.get("STTS_CONFIG_FORMAT"))
-    if fmt == "yaml":
-        if CONFIG_FILE_YAML.exists():
-            return CONFIG_FILE_YAML
-        if CONFIG_FILE_YML.exists():
-            return CONFIG_FILE_YML
-        return CONFIG_FILE_YAML
-    if fmt == "json":
-        return CONFIG_FILE_JSON
-
-    # auto-detect: prefer YAML if present
-    if CONFIG_FILE_YAML.exists():
-        return CONFIG_FILE_YAML
-    if CONFIG_FILE_YML.exists():
-        return CONFIG_FILE_YML
-    if CONFIG_FILE_JSON.exists():
-        return CONFIG_FILE_JSON
-    return CONFIG_FILE_JSON
+    return _config.get_config_file_for_load()
 
 
 def _get_config_file_for_save() -> Path:
-    fmt = _normalize_config_format(os.environ.get("STTS_CONFIG_FORMAT"))
-    if fmt == "yaml":
-        # preserve existing .yml if used
-        if CONFIG_FILE_YML.exists() and not CONFIG_FILE_YAML.exists():
-            return CONFIG_FILE_YML
-        return CONFIG_FILE_YAML
-    if fmt == "json":
-        return CONFIG_FILE_JSON
-
-    # auto: save where user already has config
-    if CONFIG_FILE_YAML.exists():
-        return CONFIG_FILE_YAML
-    if CONFIG_FILE_YML.exists():
-        return CONFIG_FILE_YML
-    if CONFIG_FILE_JSON.exists():
-        return CONFIG_FILE_JSON
-    return CONFIG_FILE_JSON
+    return _config.get_config_file_for_save()
 
 
 def _parse_simple_yaml(text: str) -> dict:
     """Very small YAML subset parser for flat key: value maps."""
-    out: dict = {}
-    for raw in (text or "").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if ":" not in line:
-            continue
-        k, v = line.split(":", 1)
-        key = k.strip()
-        if not key:
-            continue
-        val_s = v.strip()
-        if not val_s or val_s in ("null", "~"):
-            out[key] = None
-            continue
-
-        if (val_s.startswith("\"") and val_s.endswith("\"")) or (val_s.startswith("'") and val_s.endswith("'")):
-            out[key] = val_s[1:-1]
-            continue
-
-        low = val_s.lower()
-        if low in ("true", "yes", "y", "on"):
-            out[key] = True
-            continue
-        if low in ("false", "no", "n", "off"):
-            out[key] = False
-            continue
-
-        try:
-            if any(ch in val_s for ch in (".", "e", "E")):
-                out[key] = float(val_s)
-            else:
-                out[key] = int(val_s)
-            continue
-        except Exception:
-            pass
-
-        out[key] = val_s
-    return out
+    return _config.parse_simple_yaml(text)
 
 
 def _dump_simple_yaml(data: dict) -> str:
     """Dump flat dict to YAML (simple key: value)."""
-    def fmt(v):
-        if v is None:
-            return "null"
-        if isinstance(v, bool):
-            return "true" if v else "false"
-        if isinstance(v, (int, float)):
-            return str(v)
-        s = str(v)
-        if s == "":
-            return "\"\""
-        needs_quote = any(ch.isspace() for ch in s) or any(ch in s for ch in (":", "#", "\"", "'"))
-        if needs_quote:
-            s2 = s.replace("\\", "\\\\").replace("\"", "\\\"")
-            return f"\"{s2}\""
-        return s
-
-    lines = []
-    for k in sorted(data.keys()):
-        if not isinstance(k, str):
-            continue
-        lines.append(f"{k}: {fmt(data[k])}")
-    return "\n".join(lines) + "\n"
+    return _config.dump_simple_yaml(data)
 
 
 def _yaml_fmt_scalar(v: Any) -> str:
