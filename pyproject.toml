@@ -5,15 +5,16 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "stts"
 version = "0.1.38"
-description = "Universal STT/TTS Shell Wrapper"
+description = "stts (Universal Voice Shell) - Cross-platform wrapper for Speech-to-Text and Text-to-Speech engines (Vosk, Piper, Whisper, eSpeak) with seamless shell integration."
 readme = "README.md"
 requires-python = ">=3.8"
-license = { file = "LICENSE" }
+license = "Apache-2.0"
 authors = [{ name = "Tom Sapletta" }]
 keywords = ["stt", "tts", "cli"]
 classifiers = [
-  "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: Apache Software License",
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
 ]
 
 [tool.setuptools]

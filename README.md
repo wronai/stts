@@ -1,11 +1,10 @@
+# 🎙️ stts - Universal Voice Shell
+
 ![img.png](img.png)
 
 ![img_1.png](img_1.png)
 
-
 [terminal1.mp4](terminal1.mp4)
-
-# 🎙️ stts - Universal Voice Shell
 
 ```yaml
 selected_models:
