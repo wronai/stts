@@ -1,0 +1,56 @@
+# code2llm/evolution | 135 func | 30f | 2026-03-02
+
+NEXT[10] (ranked by impact):
+  [1] !! SPLIT           python/stts_core/shell.py
+      WHY: 770L, 1 classes, max CC=78
+      EFFORT: ~4h  IMPACT: 60060
+
+  [2] !! SPLIT-FUNC      VoiceShell.run_daemon  CC=78  fan=34
+      WHY: CC=78 exceeds 15
+      EFFORT: ~1h  IMPACT: 2652
+
+  [3] !! SPLIT-FUNC      VoiceShell.run  CC=56  fan=36
+      WHY: CC=56 exceeds 15
+      EFFORT: ~1h  IMPACT: 2016
+
+  [4] !! SPLIT-FUNC      VoskSTT.transcribe  CC=30  fan=38
+      WHY: CC=30 exceeds 15
+      EFFORT: ~1h  IMPACT: 1140
+
+  [5] !! SPLIT-FUNC      run_nlp2cmd_stdin_mode  CC=27  fan=20
+      WHY: CC=27 exceeds 15
+      EFFORT: ~1h  IMPACT: 540
+
+  [6] !! SPLIT-FUNC      run_stt_stream_shell  CC=27  fan=17
+      WHY: CC=27 exceeds 15
+      EFFORT: ~1h  IMPACT: 459
+
+  [7] !  SPLIT-FUNC      WhisperCppSTT.transcribe  CC=21  fan=20
+      WHY: CC=21 exceeds 15
+      EFFORT: ~1h  IMPACT: 420
+
+  [8] !  SPLIT-FUNC      run_nlp2cmd_parallel_fastpath  CC=21  fan=19
+      WHY: CC=21 exceeds 15
+      EFFORT: ~1h  IMPACT: 399
+
+  [9] !  SPLIT-FUNC      VoiceShell.run_command_interactive  CC=20  fan=18
+      WHY: CC=20 exceeds 15
+      EFFORT: ~1h  IMPACT: 360
+
+  [10] !  SPLIT-FUNC      DeepgramSTT.transcribe  CC=20  fan=18
+      WHY: CC=20 exceeds 15
+      EFFORT: ~1h  IMPACT: 360
+
+
+RISKS[1]:
+  ⚠ Splitting python/stts_core/shell.py may break 12 import paths
+
+METRICS-TARGET:
+  CC̄:          7.4 → ≤5.0
+  max-CC:      78 → ≤20
+  god-modules: 1 → 0
+  high-CC(≥15): 17 → ≤8
+  hub-types:   0 → ≤0
+
+HISTORY:
+  (first run — no previous data)

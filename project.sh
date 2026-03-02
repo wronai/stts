@@ -1,3 +1,4 @@
 #!/usr/bin/env bash
-code2logic ./nodejs -f toon --compact --function-logic --with-schema -o nodejs.toon
-code2logic ./python -f toon --compact --function-logic --with-schema -o python.toon
+pip install code2llm --upgrade
+#code2logic ./ -f toon --compact --no-repeat-module --function-logic --with-schema --name project -o ./
+code2llm ./ -f toon,evolution,code2logic -o ./project

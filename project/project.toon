@@ -1,0 +1,283 @@
+# stts | 45f 8873L | python:43/javascript:2
+# Keys: M=modules, D=details, i=imports, c=classes, f=functions, m=methods
+M[45]:
+  bump_version.py,60
+  examples/bench_metrics.py,93
+  nodejs/stts.mjs,1464
+  python/stts,1785
+  python/stts_core/__init__.py,38
+  python/stts_core/cli.py,170
+  python/stts_core/config.py,168
+  python/stts_core/download_utils.py,6
+  python/stts_core/nlp2cmd_client.py,59
+  python/stts_core/pipeline.py,160
+  python/stts_core/pipeline_helpers.py,347
+  python/stts_core/pipeline_utils.py,34
+  python/stts_core/providers.py,43
+  python/stts_core/providers/__init__.py,50
+  python/stts_core/providers/stt/__init__.py,15
+  python/stts_core/providers/stt/coqui.py,47
+  python/stts_core/providers/stt/deepgram.py,77
+  python/stts_core/providers/stt/faster_whisper.py,81
+  python/stts_core/providers/stt/picovoice.py,40
+  python/stts_core/providers/stt/vosk.py,258
+  python/stts_core/providers/stt/whisper_cpp.py,247
+  python/stts_core/providers/tts/__init__.py,21
+  python/stts_core/providers/tts/coqui.py,51
+  python/stts_core/providers/tts/espeak.py,46
+  python/stts_core/providers/tts/festival.py,49
+  python/stts_core/providers/tts/flite.py,25
+  python/stts_core/providers/tts/kokoro.py,39
+  python/stts_core/providers/tts/piper.py,200
+  python/stts_core/providers/tts/rhvoice.py,42
+  python/stts_core/providers/tts/say.py,25
+  python/stts_core/providers/tts/spd_say.py,21
+  python/stts_core/registry.py,7
+  python/stts_core/runtime.py,53
+  python/stts_core/shell.py,680
+  python/stts_core/shell_utils.py,104
+  python/stts_core/text.py,326
+  python/tests/conftest.py,5
+  python/tests/test_bench_metrics.py,32
+  python/tests/test_e2e_cli.py,94
+  python/tests/test_functional.py,123
+  python/tests/test_nlp2cmd_client.py,61
+  python/tests/test_providers.py,164
+  python/tests/test_shell_core.py,73
+  stts,19
+  stts.mjs,12
+D:
+  bump_version.py:
+    i: json,re,sys,pathlib.Path
+    e: ROOT,VERSION_FILE,PYPROJECT_FILE,PACKAGE_JSON_FILE,SEMVER_RE,read_version,write_version,bump
+    read_version()->str
+    write_version(version:str)->None
+    bump(version:str;part:str)->str
+    replace_version_in_pyproject(version:str)->None
+    replace_version_in_package_json(version:str)->None
+    main()->int
+  examples/bench_metrics.py:
+    i: math,re,statistics,sys,difflib.SequenceMatcher,typing.{Iterable,List,Tuple}
+    e: wer,cer,ratio,stats,main
+    _norm(s:str)->str
+    _tokens(s:str)->List[str]
+    _edit_distance(a:List[str];b:List[str])->int
+    wer(ref:str;hyp:str)->float
+    cer(ref:str;hyp:str)->float
+    ratio(ref:str;hyp:str)->float
+    stats(values:Iterable[float])->Tuple[float, float, float, float, float]
+    main()->int
+  nodejs/stts.mjs:
+    i: node:child_process,node:os,node:fs,node:readline,node:https,node:path,node:url
+    e: detectPromptFlag,detectCuda,cprint,Nlp2cmdWorker,interactiveSetup,nlp2cmdConfirm,ensureDir,runCommand
+    Nlp2cmdWorker: constructor(1),translate(1)
+    getActivePulseDevices()
+    loadDotenv()
+    applyEnvOverrides(config)
+    cprint(color;text)
+    yamlFmtScalar(v)
+    buildStartupYaml(config)
+    emitStartupYaml(config)
+    levenshteinBounded(a;b;maxDist)
+  python/stts:
+    i: os,sys,json,subprocess,platform,shutil,tarfile,zipfile,urllib.{parse,request}
+    e: HERE,load_dotenv,CONFIG_DIR,CONFIG_FILE_JSON,CONFIG_FILE_YAML,CONFIG_FILE_YML,MODELS_DIR,BIN_DIR
+    Colors: 
+    SystemInfo: 
+    _NLP2CMDWorker: __init__(1),_drain_stderr(0),translate(2)
+    VoiceShell: __init__(1)
+    _output_format()->str
+    _yaml_mode()->bool
+    _yaml_out()
+    _text_out()
+    _stdout_isatty()->bool
+    load_dotenv()->None
+    apply_env_overrides(config:dict)->dict
+    cprint(color:str;text:str;end:str='\n')
+  python/stts_core/cli.py:
+    i: typing.{List,Optional}
+    e: parse_args
+    parse_args(argv:List[str])
+  python/stts_core/config.py:
+    i: json,os,pathlib.Path,typing.{Any,Optional}
+    e: _CONFIG_DIR_ENV,CONFIG_DIR,CONFIG_FILE_JSON,CONFIG_FILE_YAML,CONFIG_FILE_YML,MODELS_DIR,BIN_DIR,HISTORY_FILE
+    normalize_config_format(v:Optional[str])->Optional[str]
+    get_config_file_for_load()->Optional[Path]
+    get_config_file_for_save()->Path
+    parse_simple_yaml(text:str)->dict
+    dump_simple_yaml(data:dict)->str
+    load_config()->dict
+    save_config(config:dict)->None
+  python/stts_core/download_utils.py:
+    _download_progress(count;block_size;total_size)
+  python/stts_core/nlp2cmd_client.py:
+    i: json,typing.{Any,Dict,Optional,Tuple}
+    e: nlp2cmd_service_query_ex,nlp2cmd_service_query,nlp2cmd_service_health_ex,nlp2cmd_service_health
+    nlp2cmd_service_query_ex(query:str;url:str='http://localhost:8000';execute:bool=True;timeout:float=30.0)->Tuple[Optional[Dict[str, Any]], Optional[Exception]]
+    nlp2cmd_service_query(query:str;url:str='http://localhost:8000';execute:bool=True;timeout:float=30.0)->Optional[Dict[str, Any]]
+    nlp2cmd_service_health_ex(url:str;timeout:float=2.5)->Tuple[bool, Optional[Exception]]
+    nlp2cmd_service_health(url:str;timeout:float=2.5)->bool
+  python/stts_core/pipeline.py:
+    i: contextlib,os,sys,dataclasses.{dataclass,field},enum.{Enum,auto},typing.{Any,Callable,List}
+    e: PipelineMode,PipelineRequest,PipelineResult,run_pipeline,detect_pipeline_mode
+    PipelineMode:   # Pipeline execution modes.
+    PipelineRequest:   # Immutable request describing what the...
+    PipelineResult: success(0)  # Result of pipeline execution.
+    run_pipeline(req:PipelineRequest)->PipelineResult
+    _dispatch(req:PipelineRequest)->Optional[int]
+    detect_pipeline_mode(stt_once:bool;stt_stream_shell:bool;stt_file:Optional[str];stt_only:bool;dry_run:bool;rest:List[str])->Optional[PipelineMode]
+  python/stts_core/pipeline_helpers.py:
+    i: contextlib,os,re,sys,dataclasses.dataclass,typing.{Any,Callable,Optional}
+    e: PipelineDeps,run_stt_stream_shell,run_stt_once,run_nlp2cmd_parallel_fastpath,run_stt_file_placeholder_mode,run_stt_file_default_mode,run_pipe_dry_run,run_nlp2cmd_stdin_mode
+    PipelineDeps: 
+    _yaml_mode()->bool
+    _yaml_out()
+    _yaml_quote_scalar(v:Any)->str
+    _yaml_unquote_scalar(s:str)->str
+    _extract_last_stt_text_from_stream(data:str)->str
+    run_stt_stream_shell(deps:PipelineDeps;shell;config;stt_file;stream_shell_cmd;dry_run)
+    run_stt_once(deps:PipelineDeps;shell;stt_file)
+    run_nlp2cmd_parallel_fastpath(deps:PipelineDeps;config;shell;stt_file;stt_only;dry_run;...+1)
+  python/stts_core/pipeline_utils.py:
+    i: contextlib,os,subprocess,sys,shlex
+    e: argv_to_cmd,expand_placeholders
+    argv_to_cmd(args)
+    expand_placeholders(deps;args;shell;config;stt_file=None)
+  python/stts_core/providers.py:
+    i: typing.{Any,List,Optional,Tuple}
+    e: STTProvider,TTSProvider
+    STTProvider: is_available(1),install(1),get_recommended_model(1),__init__(4),transcribe(1)
+    TTSProvider: is_available(1),install(1),__init__(3),speak(1)
+  python/stts_core/providers/__init__.py:
+    i: typing.{Any,List,Optional,Tuple}
+    e: STTProvider,TTSProvider
+    STTProvider: is_available(1),install(1),get_recommended_model(1),__init__(4),transcribe(1)  # Base class for STT (Speech-to-Text) p...
+    TTSProvider: is_available(1),install(1),__init__(3),speak(1)  # Base class for TTS (Text-to-Speech) p...
+  python/stts_core/providers/stt/coqui.py:
+    i: os,subprocess,sys,wave,pathlib.Path,stts_core.config.MODELS_DIR,stts_core.providers.STTProvider,stts_core.shell_utils.{Colors,cprint},typing.Optional
+    e: CoquiSTT
+    CoquiSTT: is_available(1),get_recommended_model(1),transcribe(1)  # Coqui STT - lightweight, CPU-friendly...
+  python/stts_core/providers/stt/deepgram.py:
+    i: json,os,pathlib.Path,stts_core.providers.STTProvider,stts_core.shell_utils.{Colors,cprint},stts_core.text.TextNormalizer,typing.Optional,urllib.request
+    e: DeepgramSTT
+    DeepgramSTT: is_available(1),get_recommended_model(1),transcribe(1)  # Online STT (Deepgram REST).
+  python/stts_core/providers/stt/faster_whisper.py:
+    i: os,subprocess,sys,stts_core.providers.STTProvider,stts_core.shell_utils.{Colors,cprint},stts_core.text.TextNormalizer,typing.Optional
+    e: FasterWhisperSTT
+    FasterWhisperSTT: is_available(1),install(1),get_recommended_model(1),transcribe(1)  # faster-whisper STT provider - CTransl...
+  python/stts_core/providers/stt/picovoice.py:
+    i: os,stts_core.providers.STTProvider,stts_core.shell_utils.{Colors,cprint},stts_core.text.TextNormalizer,typing.Optional
+    e: PicovoiceSTT
+    PicovoiceSTT: is_available(1),get_recommended_model(1),transcribe(1)  # Picovoice Leopard - ultra-lightweight...
+  python/stts_core/providers/stt/vosk.py:
+    i: json,os,shutil,subprocess,sys,tempfile,zipfile,pathlib.Path,typing.List,urllib.request
+    e: VoskSTT
+    VoskSTT: is_available(1),install(1),download_model(1),get_recommended_model(1),_find_model_path(0)  # Offline, fast, lightweight STT (good...
+  python/stts_core/providers/stt/whisper_cpp.py:
+    i: functools,math,os,re,shutil,subprocess,pathlib.Path,typing.{Optional,Tuple},urllib.request
+    e: WhisperCppSTT
+    WhisperCppSTT: is_available(1),get_recommended_model(1),_detect_cuda(0),_has_gpu_build(0),install(2)  # Offline, fast, CPU-optimized Whisper...
+  python/stts_core/providers/tts/coqui.py:
+    i: os,shutil,subprocess,sys,tempfile,pathlib.Path,shell_utils.{Colors,cprint,play_audio},stts_core.providers.TTSProvider
+    e: CoquiTTS
+    CoquiTTS: is_available(1),speak(1)  # Coqui TTS - open-source neural TTS.
+  python/stts_core/providers/tts/espeak.py:
+    i: os,shutil,subprocess,tempfile,pathlib.Path,stts_core.providers.TTSProvider,stts_core.shell_utils.{Colors,cprint}
+    e: EspeakTTS
+    EspeakTTS: is_available(1),speak(1)  # Espeak TTS - lightweight, multi-langu...
+  python/stts_core/providers/tts/festival.py:
+    i: os,shutil,subprocess,tempfile,pathlib.Path,stts_core.providers.TTSProvider,stts_core.shell_utils.{Colors,cprint,play_audio}
+    e: FestivalTTS
+    FestivalTTS: is_available(1),speak(1)  # Festival TTS - classic, ultra-lightwe...
+  python/stts_core/providers/tts/flite.py:
+    i: shutil,subprocess,stts_core.providers.TTSProvider
+    e: FliteTTS
+    FliteTTS: is_available(1),speak(1)  # Flite TTS - lightweight, fast speech...
+  python/stts_core/providers/tts/kokoro.py:
+    i: os,tempfile,pathlib.Path,stts_core.providers.TTSProvider,stts_core.shell_utils.{Colors,cprint,play_audio}
+    e: KokoroTTS
+    KokoroTTS: is_available(1),speak(1)  # Kokoro-82M - new open-source, fast on...
+  python/stts_core/providers/tts/piper.py:
+    i: os,shutil,subprocess,tarfile,tempfile,pathlib.Path,stts_core.providers.TTSProvider,typing.{Optional,Tuple},urllib.request
+    e: PiperTTS
+    PiperTTS: find_piper_bin(0),_piper_asset_name(1),install_local(2),_parse_voice_id(1),download_voice(2)  # Piper TTS - fast, local neural TTS wi...
+  python/stts_core/providers/tts/rhvoice.py:
+    i: os,shutil,subprocess,tempfile,pathlib.Path,stts_core.providers.TTSProvider,stts_core.shell_utils.{Colors,cprint,play_audio}
+    e: RHVoiceTTS
+    RHVoiceTTS: is_available(1),speak(1)  # RHVoice - native Polish TTS, fast CPU.
+  python/stts_core/providers/tts/say.py:
+    i: shutil,subprocess,stts_core.providers.TTSProvider
+    e: SayTTS
+    SayTTS: is_available(1),speak(1)  # macOS say command - built-in TTS.
+  python/stts_core/providers/tts/spd_say.py:
+    i: shutil,subprocess,stts_core.providers.TTSProvider
+    e: SpdSayTTS
+    SpdSayTTS: is_available(1),speak(1)  # Speech Dispatcher TTS - system integr...
+  python/stts_core/registry.py:
+    i: stts_core.providers.{STTProvider,TTSProvider},typing.{Iterable,Tuple,Type}
+    e: build_stt_providers,build_tts_providers
+    build_stt_providers(items:Iterable[Tuple[str;Type[STTProvider]]])
+    build_tts_providers(items:Iterable[Tuple[str;Type[TTSProvider]]])
+  python/stts_core/runtime.py:
+    i: os,signal,sys,pathlib.Path
+    e: output_format,yaml_mode,yaml_out,text_out,stdout_isatty,load_dotenv,set_sigpipe_default
+    output_format()->str
+    yaml_mode()->bool
+    yaml_out()
+    text_out()
+    stdout_isatty()->bool
+    load_dotenv()->None
+    set_sigpipe_default()->None
+  python/stts_core/shell.py:
+    i: atexit,datetime,json,os,shutil,subprocess,sys,threading,time,pathlib.Path
+    e: VoiceShell
+    VoiceShell: __init__(2),_init_stt(0),_init_tts(0),speak(1),transcribe(1)
+  python/stts_core/shell_utils.py:
+    i: os,platform,shutil,subprocess,dataclasses.dataclass,typing.Optional
+    e: Colors,cprint,SystemInfo,detect_system,play_audio
+    Colors:   # ANSI color codes.
+    SystemInfo:   # System information for provider avail...
+    cprint(color:str;text:str;end:str='\n')
+    detect_system(fast:bool=False)->SystemInfo
+    play_audio(path:str)->None
+  python/stts_core/text.py:
+    i: difflib,functools,re,typing.Optional
+    e: TextNormalizer,normalize_stt
+    TextNormalizer: normalize(2),_fix_phonetic_english(2),_fuzzy_phonetic_replacement(1)  # Normalizuje i koryguje tekst z STT dl...
+    normalize_stt(text:str;language:str='pl';context:str='command')->str
+  python/tests/test_bench_metrics.py:
+    i: unittest,importlib.util,pathlib.Path
+    e: TestBenchMetrics
+    TestBenchMetrics: setUpClass(0),test_wer_exact_match(0),test_wer_missing_token(0),test_cer_exact_match(0),test_cer_missing_char(0)
+    _load_metrics_module()
+  python/tests/test_e2e_cli.py:
+    i: os,tempfile,unittest,subprocess,pathlib.Path
+    e: TestE2ECLI
+    TestE2ECLI: setUpClass(0),_run(1),test_stt_only_mock_echo_hello(0),test_stt_once_mock(0),test_execute_from_stt_file_mock(0)
+  python/tests/test_functional.py:
+    i: os,tempfile,unittest,importlib.{machinery,util},pathlib.Path,unittest.mock.patch
+    e: TestFunctional
+    TestFunctional: setUpClass(0),tearDownClass(0),test_parse_args_basic(0),test_yaml_roundtrip_simple(0),test_wake_word_matching(0)
+    _load_stts_module(config_dir:str)
+  python/tests/test_nlp2cmd_client.py:
+    i: json,unittest,stts_core.nlp2cmd_client,unittest.mock.{MagicMock,patch}
+    e: TestNlp2cmdClient
+    TestNlp2cmdClient: test_query_ex_success_builds_request_and_parses_json(1),test_query_ex_error_returns_exception(1),test_health_ex_healthy(1),test_health_ex_non_200_status(1),test_health_ex_error_returns_exception(1)
+  python/tests/test_providers.py:
+    i: os,tempfile,unittest,importlib.{machinery,util},pathlib.Path
+    e: TestSTTProviders,TestTTSProviders,TestProviderDetection
+    TestSTTProviders: setUpClass(0),tearDownClass(0),test_stt_providers_registry(0),test_stt_provider_base_class(0),test_whisper_cpp_provider_attributes(0)  # Test STT provider classes.
+    TestTTSProviders: setUpClass(0),tearDownClass(0),test_tts_providers_registry(0),test_tts_provider_base_class(0),test_espeak_provider_attributes(0)  # Test TTS provider classes.
+    TestProviderDetection: setUpClass(0),tearDownClass(0),test_detect_system_returns_info(0),test_provider_is_available_returns_tuple(0)  # Test provider availability detection.
+    _load_stts_module(config_dir:str)
+  python/tests/test_shell_core.py:
+    i: os,tempfile,unittest,pathlib.Path,stts_core.shell.VoiceShell
+    e: TestVoiceShellCore
+    _ReadlineStub: read_history_file(1),write_history_file(1)
+    _ColorsStub: 
+    _DepsStub: __init__(1),cprint(3),detect_system(1),_ts(0),analyze_wav(1)
+    TestVoiceShellCore: test_transcribe_mock_sidecar(0),test_listen_with_stt_file_uses_transcribe(0)
+  stts:
+    i: os,sys,pathlib.Path
+    e: main
+    main()->int

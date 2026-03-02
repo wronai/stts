@@ -1,0 +1,316 @@
+# code2llm | 32f 4167L | py:32 | 2026-03-02
+# CC̄=7.7 | critical:30/135 | dups:0 | cycles:0
+
+HEALTH[17]:
+  🟡 CC    parse_simple_yaml CC=18 (limit:15)
+  🟡 CC    parse_args CC=48 (limit:15)
+  🟡 CC    _init_stt CC=16 (limit:15)
+  🟡 CC    transcribe CC=16 (limit:15)
+  🟡 CC    listen CC=19 (limit:15)
+  🟡 CC    run_command_interactive CC=20 (limit:15)
+  🟡 CC    run CC=56 (limit:15)
+  🟡 CC    run_daemon CC=78 (limit:15)
+  🟡 CC    transcribe CC=20 (limit:15)
+  🟡 CC    download_model CC=17 (limit:15)
+  🟡 CC    transcribe CC=30 (limit:15)
+  🟡 CC    transcribe CC=21 (limit:15)
+  🟡 CC    detect_system CC=17 (limit:15)
+  🟡 CC    run_stt_stream_shell CC=27 (limit:15)
+  🟡 CC    run_nlp2cmd_parallel_fastpath CC=21 (limit:15)
+  🟡 CC    run_nlp2cmd_stdin_mode CC=27 (limit:15)
+  🟡 CC    detect_pipeline_mode CC=23 (limit:15)
+
+REFACTOR[1]:
+  1. split 17 high-CC methods  (CC>15)
+
+COUPLING: no cross-package imports detected
+
+LAYERS:
+  python/                         CC̄=7.9    ←in:0  →out:0
+  │ !! shell                      770L  1C   12m  CC=78     ←0
+  │ !! pipeline_helpers           401L  1C   12m  CC=27     ←1
+  │ !  text                       353L  1C    4m  CC=14     ←6
+  │ !! vosk                       302L  1C    6m  CC=30     ←0
+  │ !! whisper_cpp                285L  1C   11m  CC=21     ←0
+  │ !  piper                      224L  1C    8m  CC=14     ←0
+  │ !! pipeline                   205L  3C    3m  CC=23     ←0
+  │ !! config                     196L  0C    7m  CC=18     ←0
+  │ !! cli                        175L  0C    1m  CC=48     ←0
+  │ !! shell_utils                121L  2C    3m  CC=17     ←12
+  │ !  faster_whisper             100L  1C    4m  CC=13     ←0
+  │ !! deepgram                    93L  1C    3m  CC=20     ←0
+  │ nlp2cmd_client              72L  0C    4m  CC=4      ←0
+  │ __init__                    70L  2C    9m  CC=2      ←0
+  │ !  runtime                     69L  0C    7m  CC=12     ←0
+  │ !  coqui                       64L  1C    2m  CC=10     ←0
+  │ festival                    63L  1C    2m  CC=6      ←0
+  │ coqui                       59L  1C    3m  CC=6      ←0
+  │ rhvoice                     56L  1C    2m  CC=8      ←0
+  │ espeak                      54L  1C    2m  CC=7      ←0
+  │ kokoro                      53L  1C    2m  CC=5      ←0
+  │ picovoice                   51L  1C    3m  CC=5      ←0
+  │ __init__                    48L  0C    0m  CC=0.0    ←0
+  │ !  pipeline_utils              42L  0C    2m  CC=11     ←0
+  │ say                         33L  1C    2m  CC=4      ←0
+  │ flite                       33L  1C    2m  CC=4      ←0
+  │ spd_say                     29L  1C    2m  CC=3      ←0
+  │ __init__                    23L  0C    0m  CC=0.0    ←0
+  │ __init__                    17L  0C    0m  CC=0.0    ←0
+  │ registry                    13L  0C    2m  CC=2      ←0
+  │ download_utils               9L  0C    1m  CC=2      ←0
+  │
+  ./                              CC̄=2.5    ←in:0  →out:0
+  │ bump_version                84L  0C    6m  CC=5      ←0
+  │
+
+DUPLICATES[0]: none
+
+FUNCTIONS (CC≥10, 30 of 127):
+   78.0  VoiceShell.run_daemon                      19n   3exit  loops+cond+ret  !! split
+   56.0  VoiceShell.run                             19n   1exit  loops+cond  !! split
+   48.0  parse_args                                 10n   2exit  loops+cond+ret  !! split
+   30.0  VoskSTT.transcribe                          5n   2exit  cond+ret  !! split
+   27.0  run_stt_stream_shell                        6n   2exit  loops+cond+ret  !! split
+   27.0  run_nlp2cmd_stdin_mode                     38n  11exit  cond+ret  !! split
+   23.0  detect_pipeline_mode                       28n   9exit  cond+ret  !! split
+   21.0  WhisperCppSTT.transcribe                   14n   2exit  loops+cond+ret  !! split
+   21.0  run_nlp2cmd_parallel_fastpath              35n  10exit  cond+ret  !! split
+   20.0  VoiceShell.run_command_interactive          6n   2exit  loops+cond+ret  !! split
+   20.0  DeepgramSTT.transcribe                      6n   3exit  cond+ret  !! split
+   19.0  VoiceShell.listen                          28n   4exit  loops+cond+ret  !! split
+   18.0  parse_simple_yaml                          18n   2exit  loops+cond+ret  !! split
+   17.0  VoskSTT.download_model                     16n   3exit  cond+ret  !! split
+   17.0  detect_system                               7n   2exit  cond+ret  !! split
+   16.0  VoiceShell._init_stt                       17n   4exit  cond+ret  !! split
+   16.0  VoiceShell.transcribe                      22n   3exit  cond+ret  !! split
+   14.0  TextNormalizer._fuzzy_phonetic_replacement   18n   7exit  cond+ret
+   14.0  PiperTTS.speak                             12n   3exit  cond+ret
+   14.0  WhisperCppSTT.download_model               19n   6exit  cond+ret
+   13.0  FasterWhisperSTT.transcribe                 2n   1exit  
+   13.0  _extract_last_stt_text_from_stream         17n   3exit  loops+cond+ret
+   13.0  run_stt_file_placeholder_mode              16n   5exit  cond+ret
+   12.0  load_dotenv                                 3n   1exit  loops
+   11.0  expand_placeholders                        13n   3exit  loops+cond+ret
+   11.0  _dispatch                                  27n  10exit  cond+ret
+   10.0  TextNormalizer._fix_phonetic_english       17n   3exit  loops+cond+ret
+   10.0  CoquiTTS.speak                              2n   1exit  
+   10.0  WhisperCppSTT.install                       5n   2exit  cond+ret
+   10.0  _yaml_quote_scalar                         18n   7exit  cond+ret
+
+  summary:
+    critical(≥10): 30 | high(5-10): 33 | medium(2-5): 43 | low(<2): 21
+    24% CC≥10  50% CC≥5
+
+HOTSPOTS:
+  #1  VoskSTT.transcribe                   fan=38   "VoskSTT method, fan-out=38"
+  #2  VoiceShell.run                       fan=36   "VoiceShell method, fan-out=36"
+  #3  VoiceShell.run_daemon                fan=34   "VoiceShell method, fan-out=34"
+  #4  WhisperCppSTT.transcribe             fan=20   "WhisperCppSTT method, fan-out=20"
+  #5  detect_system                        fan=20   "calls 20 functions"
+  #6  run_nlp2cmd_stdin_mode               fan=20   "calls 20 functions"
+  #7  run_nlp2cmd_parallel_fastpath        fan=19   "calls 19 functions"
+  #8  VoiceShell.run_command_interactive   fan=18   "VoiceShell method, fan-out=18"
+  #9  DeepgramSTT.transcribe               fan=18   "DeepgramSTT method, fan-out=18"
+  #10 load_dotenv                          fan=17   "calls 17 functions"
+
+CLASSES:
+  VoiceShell                     ████████████████████████  12m  CC̄=19.4  max=78    !!
+  WhisperCppSTT                  ██████████████████████    11m  CC̄=6.7   max=21    !!
+  PiperTTS                       ████████████████           8m  CC̄=7.2   max=14  
+  VoskSTT                        ████████████               6m  CC̄=10.8  max=30    !!
+  STTProvider                    ██████████                 5m  CC̄=1.2   max=2   
+  TTSProvider                    ████████                   4m  CC̄=1.2   max=2   
+  FasterWhisperSTT               ████████                   4m  CC̄=5.5   max=13  
+  TextNormalizer                 ██████                     3m  CC̄=9.7   max=14  
+  DeepgramSTT                    ██████                     3m  CC̄=7.7   max=20    !!
+  CoquiSTT                       ██████                     3m  CC̄=3.0   max=6   
+  PicovoiceSTT                   ██████                     3m  CC̄=2.7   max=5   
+  RHVoiceTTS                     ████                       2m  CC̄=5.5   max=8   
+  FestivalTTS                    ████                       2m  CC̄=5.0   max=6   
+  CoquiTTS                       ████                       2m  CC̄=6.5   max=10  
+  EspeakTTS                      ████                       2m  CC̄=5.0   max=7   
+  SayTTS                         ████                       2m  CC̄=3.5   max=4   
+  KokoroTTS                      ████                       2m  CC̄=3.5   max=5   
+  FliteTTS                       ████                       2m  CC̄=3.0   max=4   
+  SpdSayTTS                      ████                       2m  CC̄=2.5   max=3   
+  Colors                                                    0m  CC̄=0.0   max=0.0 
+  SystemInfo                                                0m  CC̄=0.0   max=0.0 
+  PipelineDeps                                              0m  CC̄=0.0   max=0.0 
+  PipelineMode                                              0m  CC̄=0.0   max=0.0 
+  PipelineRequest                                           0m  CC̄=0.0   max=0.0 
+  PipelineResult                                            0m  CC̄=0.0   max=0.0 
+
+D:
+  python/stts_core/shell.py:
+    e: VoiceShell
+    VoiceShell
+      __init__(2)  CC=2.0
+        → _init_stt(0)  CC=16.0  !
+        → _init_tts(0)  CC=8.0
+  python/stts_core/cli.py:
+    e: parse_args
+    parse_args(argv)
+  python/stts_core/providers/stt/vosk.py:
+    e: VoskSTT
+    VoskSTT  # Offline, fast, lightweight STT (good for RPi)....
+      is_available(1)  CC=4.0
+  python/stts_core/pipeline_helpers.py:
+    e: PipelineDeps,_yaml_mode,_yaml_out,_yaml_quote_scalar,_yaml_unquote_scalar,_extract_last_stt_text_from_stream,run_stt_stream_shell,run_stt_once,run_nlp2cmd_parallel_fastpath,run_stt_file_placeholder_mode,run_stt_file_default_mode,run_pipe_dry_run,run_nlp2cmd_stdin_mode
+    PipelineDeps
+    _yaml_mode()
+    _yaml_out()
+    _yaml_quote_scalar(v)
+    _yaml_unquote_scalar(s)
+    _extract_last_stt_text_from_stream(data)
+    run_stt_stream_shell(deps,shell,config,stt_file,stream_shell_cmd,dry_run)
+    run_stt_once(deps,shell,stt_file)
+    run_nlp2cmd_parallel_fastpath(deps,config,shell,stt_file,stt_only,dry_run,rest)
+    run_stt_file_placeholder_mode(deps,config,shell,stt_file,dry_run,rest)
+    run_stt_file_default_mode(deps,config,shell,stt_file,stt_only,dry_run)
+    run_pipe_dry_run()
+    run_nlp2cmd_stdin_mode(deps,config,shell,rest,dry_run)
+  python/stts_core/pipeline.py:
+    e: PipelineMode,PipelineRequest,PipelineResult,run_pipeline,_dispatch,detect_pipeline_mode
+    PipelineMode  # Pipeline execution modes....
+    PipelineRequest  # Immutable request describing what the pipeline should do.
+
+A...
+    PipelineResult  # Result of pipeline execution.
+
+Attributes:
+    exit_code: Pr...
+    run_pipeline(req)
+    _dispatch(req)
+    detect_pipeline_mode(stt_once,stt_stream_shell,stt_file,stt_only,dry_run,rest)
+  python/stts_core/providers/stt/whisper_cpp.py:
+    e: WhisperCppSTT
+    WhisperCppSTT  # Offline, fast, CPU-optimized Whisper (recommended)....
+      is_available(1)  CC=6.0
+  python/stts_core/providers/stt/deepgram.py:
+    e: DeepgramSTT
+    DeepgramSTT  # Online STT (Deepgram REST)....
+      is_available(1)  CC=2.0
+  python/stts_core/config.py:
+    e: normalize_config_format,get_config_file_for_load,get_config_file_for_save,parse_simple_yaml,dump_simple_yaml,load_config,save_config
+    normalize_config_format(v)
+    get_config_file_for_load()
+    get_config_file_for_save()
+    parse_simple_yaml(text)
+    dump_simple_yaml(data)
+    load_config()
+    save_config(config)
+  python/stts_core/shell_utils.py:
+    e: Colors,SystemInfo,cprint,detect_system,play_audio
+    Colors  # ANSI color codes....
+    SystemInfo  # System information for provider availability checks....
+    cprint(color,text,end)
+    detect_system(fast)
+    play_audio(path)
+  python/stts_core/text.py:
+    e: TextNormalizer,normalize_stt
+    TextNormalizer  # Normalizuje i koryguje tekst z STT dla poleceń shell....
+      normalize(2)  CC=5.0
+        → _fix_phonetic_english(2)  CC=10.0
+        → _fuzzy_phonetic_replacement(0)  CC=14.0
+    normalize_stt(text,language,context)
+  python/stts_core/providers/tts/piper.py:
+    e: PiperTTS
+    PiperTTS  # Piper TTS - fast, local neural TTS with Polish voices....
+      find_piper_bin(-1)  CC=6.0
+  python/stts_core/providers/stt/faster_whisper.py:
+    e: FasterWhisperSTT
+    FasterWhisperSTT  # faster-whisper STT provider - CTranslate2-optimized Whisper....
+      is_available(1)  CC=2.0
+  python/stts_core/runtime.py:
+    e: output_format,yaml_mode,yaml_out,text_out,stdout_isatty,load_dotenv,set_sigpipe_default
+    output_format()
+    yaml_mode()
+    yaml_out()
+    text_out()
+    stdout_isatty()
+    load_dotenv()
+    set_sigpipe_default()
+  python/stts_core/pipeline_utils.py:
+    e: argv_to_cmd,expand_placeholders
+    argv_to_cmd(args)
+    expand_placeholders(deps,args,shell,config,stt_file)
+  examples/bench_metrics.py:
+    e: _norm,_tokens,_edit_distance,wer,cer,ratio,stats,main
+    _norm(s)
+    _tokens(s)
+    _edit_distance(a,b)
+    wer(ref,hyp)
+    cer(ref,hyp)
+    ratio(ref,hyp)
+    stats(values)
+    main()
+  python/stts_core/providers/tts/coqui.py:
+    e: CoquiTTS
+    CoquiTTS  # Coqui TTS - open-source neural TTS....
+      is_available(1)  CC=3.0
+  python/stts_core/providers/tts/rhvoice.py:
+    e: RHVoiceTTS
+    RHVoiceTTS  # RHVoice - native Polish TTS, fast CPU....
+      is_available(1)  CC=3.0
+  python/stts_core/providers/tts/espeak.py:
+    e: EspeakTTS
+    EspeakTTS  # Espeak TTS - lightweight, multi-language speech synthesis....
+      is_available(1)  CC=3.0
+  python/stts_core/providers/tts/festival.py:
+    e: FestivalTTS
+    FestivalTTS  # Festival TTS - classic, ultra-lightweight....
+      is_available(1)  CC=4.0
+  python/stts_core/providers/stt/coqui.py:
+    e: CoquiSTT
+    CoquiSTT  # Coqui STT - lightweight, CPU-friendly, good for Polish accen...
+      is_available(1)  CC=2.0
+  bump_version.py:
+    e: read_version,write_version,bump,replace_version_in_pyproject,replace_version_in_package_json,main
+    read_version()
+    write_version(version)
+    bump(version,part)
+    replace_version_in_pyproject(version)
+    replace_version_in_package_json(version)
+    main()
+  python/stts_core/providers/tts/kokoro.py:
+    e: KokoroTTS
+    KokoroTTS  # Kokoro-82M - new open-source, fast on CPU....
+      is_available(1)  CC=2.0
+  python/stts_core/providers/stt/picovoice.py:
+    e: PicovoiceSTT
+    PicovoiceSTT  # Picovoice Leopard - ultra-lightweight STT for embedded....
+      is_available(1)  CC=2.0
+  python/stts_core/nlp2cmd_client.py:
+    e: nlp2cmd_service_query_ex,nlp2cmd_service_query,nlp2cmd_service_health_ex,nlp2cmd_service_health
+    nlp2cmd_service_query_ex(query,url,execute,timeout)
+    nlp2cmd_service_query(query,url,execute,timeout)
+    nlp2cmd_service_health_ex(url,timeout)
+    nlp2cmd_service_health(url,timeout)
+  python/stts_core/providers/tts/say.py:
+    e: SayTTS
+    SayTTS  # macOS say command - built-in TTS....
+      is_available(1)  CC=3.0
+  python/stts_core/providers/tts/flite.py:
+    e: FliteTTS
+    FliteTTS  # Flite TTS - lightweight, fast speech synthesis....
+      is_available(1)  CC=2.0
+  python/stts_core/providers/tts/spd_say.py:
+    e: SpdSayTTS
+    SpdSayTTS  # Speech Dispatcher TTS - system integration....
+      is_available(1)  CC=2.0
+  python/stts_core/registry.py:
+    e: build_stt_providers,build_tts_providers
+    build_stt_providers(items)
+    build_tts_providers(items)
+  python/stts_core/download_utils.py:
+    e: _download_progress
+    _download_progress(count,block_size,total_size)
+  python/stts_core/providers/__init__.py:
+    e: STTProvider,TTSProvider
+    STTProvider  # Base class for STT (Speech-to-Text) providers....
+      __init__(4)  CC=2.0
+    TTSProvider  # Base class for TTS (Text-to-Speech) providers....
+      __init__(3)  CC=2.0
+  python/stts_core/__init__.py:
+  python/stts_core/providers/tts/__init__.py:
+  python/stts_core/providers/stt/__init__.py:

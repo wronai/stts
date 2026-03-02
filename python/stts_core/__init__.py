@@ -1,3 +1,5 @@
+"""STTS Core - Core functionality for Speech-to-Text-to-Speech."""
+
 from .pipeline_helpers import (
     PipelineDeps,
     run_nlp2cmd_parallel_fastpath,
@@ -19,9 +21,14 @@ from .pipeline import (
 
 from .shell import VoiceShell
 
+from .text import TextNormalizer, normalize_stt
+
 __all__ = [
     # Deps
     "PipelineDeps",
+    # Text normalization
+    "TextNormalizer",
+    "normalize_stt",
     # Shell
     "VoiceShell",
     # Pipeline contract
