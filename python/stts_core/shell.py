@@ -12,6 +12,9 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from .command_handlers import InteractiveCommandHandlers
+from .daemon_handlers import DaemonHandlers
+
 
 class VoiceShell:
     def __init__(self, config: dict, deps: Any):
@@ -349,168 +352,42 @@ class VoiceShell:
         return "".join(output_parts), code, printed
 
     def run(self):
+        """Interactive voice shell REPL."""
         PS1 = f"{self.deps.Colors.GREEN}🔊 stts(py)>{self.deps.Colors.NC} "
-
-        yaml_mode_fn = getattr(self.deps, "_yaml_mode", None)
-        yaml_mode = bool(yaml_mode_fn()) if callable(yaml_mode_fn) else False
-
-        if not yaml_mode:
-            self.deps.cprint(self.deps.Colors.BOLD + self.deps.Colors.CYAN, "\nSTTS (python) - Voice Shell\n")
-            if getattr(self.info, "os_name", None) == "linux":
-                try:
-                    src, sink = self.deps.get_active_pulse_devices()
-                except Exception:
-                    src, sink = None, None
-                if src or sink:
-                    self.deps.cprint(self.deps.Colors.CYAN, "Aktywne urządzenia (PulseAudio):")
-                    if src:
-                        print(f"  mic: {src}")
-                    if sink:
-                        print(f"  speaker: {sink}")
-
-            stt_state = "disabled"
-            if self.stt:
-                stt_state = f"{getattr(self.stt, 'name', 'stt')} model={getattr(self.stt, 'model', '')}"
-            else:
-                reason = f" reason={self._stt_unavailable_reason}" if self._stt_unavailable_reason else ""
-                stt_state = (
-                    f"disabled (stt_provider={self.config.get('stt_provider')} stt_model={self.config.get('stt_model')}{reason})"
-                )
-            print(f"STT: {stt_state}")
-
-            tts_state = "disabled"
-            if self.tts:
-                tts_state = f"{getattr(self.tts, 'name', 'tts')} voice={getattr(self.tts, 'voice', '')}"
-            print(f"TTS: {tts_state}")
-            print("Komendy: ENTER=STT, 'exit'=wyjście, 'setup'=konfiguracja, 'audio'=urządzenia, 'meter'=poziomy")
-
-        if self.config.get("startup_tts", True):
-            self.speak("Powiedz co chcesz zrobić. Naciśnij enter i mów do mikrofonu.")
+        handlers = InteractiveCommandHandlers(self)
+        handlers.print_welcome()
 
         while True:
             try:
                 cmd = input(PS1).strip()
-                stt_used = False
-                if cmd in ["exit", "quit", "q"]:
+
+                # Handle built-in commands
+                if handlers.handle_exit(cmd):
                     break
                 if cmd == "setup":
-                    self.config = self.deps.interactive_setup()
-                    self.stt = self._init_stt()
-                    self.tts = self._init_tts()
+                    handlers.handle_setup()
                     continue
-                if cmd == "audio" and getattr(self.info, "os_name", None) == "linux":
-                    self.config["mic_device"] = self.deps.choose_device_interactive(
-                        "Wybierz mikrofon (arecord)", self.deps.list_capture_devices_linux()
-                    )
-                    self.config["speaker_device"] = self.deps.choose_device_interactive(
-                        "Wybierz głośnik (info)", self.deps.list_playback_devices_linux()
-                    )
-                    self.deps.save_config(self.config)
-                    continue
-                if cmd == "meter" and getattr(self.info, "os_name", None) == "linux":
-                    mics = self.deps.list_capture_devices_linux()
-                    res = self.deps.mic_meter(mics)
-                    self.config["mic_device"] = res.get("selected")
-                    self.deps.save_config(self.config)
-                    continue
-
-                if cmd.startswith("nlp "):
-                    nl = cmd[4:].strip()
-                    if not nl:
+                if cmd == "audio":
+                    if handlers.handle_audio():
                         continue
-                    translated = self.deps.nlp2cmd_translate(nl)
-                    if translated and self.deps.nlp2cmd_confirm(translated):
-                        cmd = translated
-                    else:
+                if cmd == "meter":
+                    if handlers.handle_meter():
                         continue
 
-                if not cmd:
-                    stt_used = True
-                    if (
-                        self.config.get("mic_device") is None
-                        and getattr(self.info, "os_name", None) == "linux"
-                        and self.config.get("audio_auto_switch")
-                    ):
-                        det_fn = getattr(self.deps, "auto_detect_mic", None)
-                        if callable(det_fn):
-                            det = det_fn(self.deps.list_capture_devices_linux())
-                            if det:
-                                self.config["mic_device"] = det
-                                self.deps.save_config(self.config)
-
-                    try:
-                        self.deps.nlp2cmd_prewarm(self.config)
-                    except Exception:
-                        pass
-
-                    cmd = self.listen()
-                    if not cmd:
-                        continue
-                    translated = self.deps.nlp2cmd_translate(cmd, config=self.config)
-                    looks_fn = getattr(self.deps, "_looks_like_natural_language", None)
-                    if (not translated) and callable(looks_fn) and looks_fn(cmd):
-                        translated = self.deps.nlp2cmd_translate(cmd, config=self.config, force=True)
-                    if translated:
-                        if self.deps.nlp2cmd_confirm(translated):
-                            try:
-                                self.deps.emit_stt_event_yaml(cmd, action="execute", translated=translated, reason=None)
-                            except Exception:
-                                pass
-                            cmd = translated
-                        else:
-                            try:
-                                self.deps.emit_stt_event_yaml(
-                                    cmd, action="skipped", translated=translated, reason="confirm_declined"
-                                )
-                            except Exception:
-                                pass
-                            continue
-                    else:
-                        allow_raw = os.environ.get("STTS_EXEC_RAW_STT", "0").strip().lower() in (
-                            "1",
-                            "true",
-                            "yes",
-                            "y",
-                        )
-                        if not allow_raw:
-                            try:
-                                self.deps.emit_stt_event_yaml(cmd, action="skipped", translated=None, reason="no_translation")
-                            except Exception:
-                                pass
-                            continue
-                        if callable(looks_fn) and looks_fn(cmd):
-                            self.deps.cprint(self.deps.Colors.YELLOW, "⚠️  To wygląda jak tekst naturalny, nie komenda shell.")
-                            self.deps.cprint(
-                                self.deps.Colors.CYAN,
-                                "💡 Włącz tłumaczenie: STTS_NLP2CMD_ENABLED=1 ./stts  (lub wpisz: nlp <tekst>)",
-                            )
-                            continue
-
-                self.deps.cprint(self.deps.Colors.BLUE, f"▶️  {cmd}")
-
-                is_dangerous, reason = self.deps.is_dangerous_command(cmd)
-                if is_dangerous:
-                    self.deps.cprint(self.deps.Colors.RED, f"🚫 ZABLOKOWANO: {reason}")
-                    continue
-                if self.config.get("safe_mode", False):
-                    self.deps.cprint(self.deps.Colors.YELLOW, "🔒 SAFE MODE")
-                    ans = input("Uruchomić? (y/n): ").strip().lower()
-                    if ans != "y":
+                # Handle NLP translation
+                nlp_result = handlers.handle_nlp(cmd)
+                if nlp_result is not None:
+                    cmd = nlp_result
+                elif not cmd:
+                    # Handle voice input
+                    cmd = handlers.handle_stt_input()
+                    if cmd is None:
                         continue
 
-                output, code, printed = self.run_command_any(cmd)
-                if output.strip() and not printed:
-                    print(output)
+                # Execute command
+                output, code, printed = handlers.execute_command(cmd)
+                handlers.handle_output(output, code, printed, cmd)
 
-                lines = [l.strip() for l in output.splitlines() if l.strip()]
-                if lines:
-                    last = lines[-1]
-                    if last != cmd and len(last) > 3:
-                        self.deps.cprint(self.deps.Colors.MAGENTA, f"📢 {last[:80]}")
-                        self.speak(last)
-
-                if code != 0:
-                    self.deps.cprint(self.deps.Colors.RED, f"❌ Exit code: {code}")
             except KeyboardInterrupt:
                 print()
                 continue
@@ -526,245 +403,53 @@ class VoiceShell:
         triggers: Optional[List[Tuple[str, str, bool]]] = None,
         wake_word: Optional[str] = None,
     ) -> int:
-        def log(msg: str):
-            ts = datetime.datetime.now().strftime("%H:%M:%S")
-            line = f"[{ts}] {msg}"
-            print(line, file=sys.stderr, flush=True)
-            if log_file:
-                try:
-                    with open(log_file, "a") as f:
-                        f.write(line + "\n")
-                except Exception:
-                    pass
+        """Daemon mode with wake-word detection and nlp2cmd integration."""
+        handlers = DaemonHandlers(self)
 
-        ww = (wake_word or "hejken").strip() or "hejken"
-        try:
-            self.config["_daemon"] = True
-        except Exception:
-            pass
-        self.deps.cprint(self.deps.Colors.BOLD + self.deps.Colors.CYAN, f"\n🎙️  STTS Daemon Mode (wake-word: {ww})\n")
-        log(f"nlp2cmd service: {nlp2cmd_url}")
-        log(f"nlp2cmd timeout: {nlp2cmd_timeout}s")
-        log(f"execute commands: {execute}")
-        log(f"Say '{ww} <command>' to execute. Ctrl+C to stop.")
+        # Initialize daemon
+        init_code = handlers.init(
+            nlp2cmd_url=nlp2cmd_url,
+            execute=execute,
+            nlp2cmd_timeout=nlp2cmd_timeout,
+            log_file=log_file,
+            triggers=triggers,
+            wake_word=wake_word,
+        )
+        if init_code != 0:
+            return init_code
 
-        rules = list(triggers or [])
-        if rules:
-            log(f"triggers loaded: {len(rules)}")
-
-        wake_patterns = None
-        if wake_word:
-            pat = self.deps._wake_word_phrase_to_pattern(ww)
-            if pat:
-                wake_patterns = [pat]
-                log(f"wake-word: {ww}")
-
-        wake_only_two_stage = False
-        try:
-            if (self.config.get("stt_provider") == "vosk") and wake_word and len(ww) <= 3:
-                wake_only_two_stage = True
-                log("wake-word mode: two-stage (vosk grammar)")
-        except Exception:
-            wake_only_two_stage = False
-
-        prev_grammar = None
-        if wake_only_two_stage:
-            try:
-                prev_grammar = self.config.get("stt_vosk_grammar")
-            except Exception:
-                prev_grammar = None
-
-        log("🔎 Checking nlp2cmd /health ...")
-        if not self.deps.nlp2cmd_service_health(nlp2cmd_url, timeout=2.5):
-            log("❌ nlp2cmd service is not healthy / not reachable")
-            log("   Start it first, e.g.: nlp2cmd service --host 0.0.0.0 --port 8008")
-            if self.tts:
-                try:
-                    self.speak("Serwis nlp2cmd nie odpowiada")
-                except Exception:
-                    pass
-            return 2
-
-        if self.tts and self.config.get("startup_tts", True):
-            self.speak(f"Słucham. Powiedz {ww} i wydaj polecenie.")
-
-        self._suppress_wake_word_logging = True
-
+        # Main daemon loop
         while True:
             try:
-                log("🎤 Listening...")
-                if wake_only_two_stage:
-                    try:
-                        grammar_words = self.deps.generate_wake_word_variants(ww, max_variants=24)
-                        if not grammar_words:
-                            grammar_words = [ww]
-                        log(f"wake-word grammar variants: {len(grammar_words)}")
-                        self.config["stt_vosk_grammar"] = json.dumps(grammar_words, ensure_ascii=False)
-                    except Exception:
-                        pass
-
-                    text = self.listen()
-
-                    try:
-                        if prev_grammar is None:
-                            self.config.pop("stt_vosk_grammar", None)
-                        else:
-                            self.config["stt_vosk_grammar"] = prev_grammar
-                    except Exception:
-                        pass
-                else:
-                    text = self.listen()
+                handlers.log("🎤 Listening...")
+                text = handlers.listen_with_wake_word()
 
                 if not text:
-                    if wake_only_two_stage:
-                        log("⏭️  Wake-word stage: no transcript (try speaking louder / closer)")
+                    if handlers.wake_only_two_stage:
+                        handlers.log("⏭️  Wake-word stage: no transcript (try speaking louder / closer)")
                     continue
 
-                log(f"📝 Heard: {text}")
-                matched, remaining = self.deps.check_wake_word(text, patterns=wake_patterns)
-                if not matched:
-                    log("⏭️  No wake word, ignoring")
+                # Process wake word and get command
+                should_continue, command = handlers.process_wake_word(text)
+                if not should_continue:
                     continue
 
-                if not remaining:
-                    log("🔔 Wake word detected, listening for command...")
-                    if self.tts:
-                        self.speak("Słucham")
-                    remaining = self.listen()
-                    if not remaining:
-                        log("❌ No command heard")
-                        continue
-                    remaining = self.deps.normalize_daemon_command(remaining)
-                    log(f"📝 Command: {remaining}")
-                else:
-                    remaining = self.deps.normalize_daemon_command(remaining)
-                    log(f"📝 Command: {remaining}")
-
-                if not remaining:
-                    log("❌ Empty command after normalization")
+                # Check triggers first
+                if handlers.check_triggers(command):
                     continue
 
-                trig_cmd = self.deps.match_trigger(remaining, rules)
-                if trig_cmd:
-                    log(f"⚡ Trigger matched -> {trig_cmd}")
-                    ok, reason = self.deps.check_command_safety(trig_cmd, self.config, dry_run=False)
-                    if not ok:
-                        log(f"🚫 Trigger blocked: {reason}")
-                        continue
-                    out, code, printed = self.run_command_any(trig_cmd)
-                    if out.strip() and not printed:
-                        print(out)
-                    if code != 0:
-                        log(f"❌ Exit code: {code}")
+                # Query nlp2cmd service
+                result = handlers.query_nlp2cmd(command)
+                if result is None:
                     continue
 
-                query_text = f"shell: {remaining}"
-                log(f"🚀 Sending to nlp2cmd: {query_text}")
-                result = self.deps.nlp2cmd_service_query(
-                    query=query_text,
-                    url=nlp2cmd_url,
-                    execute=execute,
-                    timeout=float(nlp2cmd_timeout or 30.0),
-                )
-                if not result:
-                    log("❌ nlp2cmd query failed")
-                    if self.tts:
-                        self.speak("Nie udało się przetworzyć")
-                    continue
+                # Execute result
+                handlers.execute_from_result(result)
 
-                if not result.get("success"):
-                    errors = result.get("errors") or ["Unknown error"]
-                    log(f"❌ nlp2cmd error: {errors}")
-                    if self.tts:
-                        self.speak(f"Błąd: {errors[0][:50]}")
-                    continue
-
-                cmd = result.get("command", "")
-                confidence = result.get("confidence", 0)
-                log(f"✅ Command: {cmd} (confidence: {confidence:.2f})")
-
-                if self.tts:
-                    self.speak(f"Wykonuję: {cmd[:80]}")
-
-                exec_result = result.get("execution_result")
-                if exec_result:
-                    if exec_result.get("success"):
-                        exit_code = exec_result.get("exit_code")
-                        duration_ms = exec_result.get("duration_ms")
-                        log(f"🏁 Executed by nlp2cmd service (exit_code={exit_code}, duration_ms={duration_ms})")
-
-                        stdout = exec_result.get("stdout", "") or ""
-                        stderr = exec_result.get("stderr", "") or ""
-
-                        if stdout:
-                            try:
-                                print(stdout, end="" if stdout.endswith("\n") else "\n", flush=True)
-                            except Exception:
-                                pass
-                        if stderr:
-                            try:
-                                print(
-                                    stderr,
-                                    end="" if stderr.endswith("\n") else "\n",
-                                    file=sys.stderr,
-                                    flush=True,
-                                )
-                            except Exception:
-                                pass
-
-                        if stdout.strip() and self.tts:
-                            lines = [l.strip() for l in stdout.splitlines() if l.strip()]
-                            if lines:
-                                self.speak(lines[-1][:100])
-                    else:
-                        exit_code = exec_result.get("exit_code")
-                        duration_ms = exec_result.get("duration_ms")
-                        stderr = exec_result.get("stderr", "") or ""
-                        stdout = exec_result.get("stdout", "") or ""
-
-                        log(f"❌ Execution failed in nlp2cmd service (exit_code={exit_code}, duration_ms={duration_ms})")
-                        if stdout:
-                            try:
-                                print(stdout, end="" if stdout.endswith("\n") else "\n", flush=True)
-                            except Exception:
-                                pass
-                        if stderr:
-                            try:
-                                print(
-                                    stderr,
-                                    end="" if stderr.endswith("\n") else "\n",
-                                    file=sys.stderr,
-                                    flush=True,
-                                )
-                            except Exception:
-                                pass
-                        if self.tts:
-                            self.speak("Komenda nie powiodła się")
-                else:
-                    log(f"▶️  Executing locally (nlp2cmd returned only translation): {cmd}")
-
-                    ok, reason = self.deps.check_command_safety(cmd, self.config, dry_run=False)
-                    if not ok:
-                        log(f"🚫 Blocked (local execute): {reason}")
-                        if self.tts:
-                            self.speak("Zablokowano komendę")
-                        continue
-
-                    out, code, _ = self.run_command_any(cmd)
-                    if out.strip():
-                        print(out, flush=True)
-                        lines = [l.strip() for l in out.splitlines() if l.strip()]
-                        if lines and self.tts:
-                            self.speak(lines[-1][:100])
-                    if code != 0:
-                        log(f"❌ Exit code: {code}")
-
-            except KeyboardInterrupt:
-                log("🛑 Stopping daemon...")
-                break
             except Exception as e:
-                log(f"❌ Error: {e}")
+                if handlers.handle_error(e):
+                    break
                 continue
 
-        log("👋 Daemon stopped")
+        handlers.log("👋 Daemon stopped")
         return 0

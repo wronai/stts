@@ -76,6 +76,11 @@ from stts_core import nlp2cmd_client as _nlp2cmd_client
 from stts_core import shell as _shell_core
 from stts_core.providers import STTProvider as _BaseSTTProvider
 from stts_core.providers import TTSProvider as _BaseTTSProvider
+
+# Public exports for backward compatibility (tests expect these)
+STTProvider = _BaseSTTProvider
+TTSProvider = _BaseTTSProvider
+
 from stts_core.providers.stt import (
     WhisperCppSTT,
     VoskSTT,
